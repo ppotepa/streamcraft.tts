@@ -266,10 +266,10 @@ export default function App() {
                                     <button
                                         key={s.id}
                                         className={`w-full text-left border rounded-xl px-3 py-2.5 flex items-center gap-3 transition ${isActive
-                                                ? 'border-accent/80 bg-white/5 shadow-md shadow-accent/25'
-                                                : unlocked
-                                                    ? 'border-white/5 bg-panel/70 hover:border-accent/40'
-                                                    : 'border-white/5 bg-panel/70 opacity-50 cursor-not-allowed'
+                                            ? 'border-accent/80 bg-white/5 shadow-md shadow-accent/25'
+                                            : unlocked
+                                                ? 'border-white/5 bg-panel/70 hover:border-accent/40'
+                                                : 'border-white/5 bg-panel/70 opacity-50 cursor-not-allowed'
                                             }`}
                                         onClick={() => unlocked && setStep(s.id)}
                                         disabled={!unlocked}
@@ -282,10 +282,10 @@ export default function App() {
                                         {statusTag(state) && (
                                             <span
                                                 className={`text-[11px] px-2 py-1 rounded-full border ${state.status === 'running'
-                                                        ? 'border-accent text-accent'
-                                                        : state.status === 'error'
-                                                            ? 'border-rose-400 text-rose-200'
-                                                            : 'border-green-400 text-green-200'
+                                                    ? 'border-accent text-accent'
+                                                    : state.status === 'error'
+                                                        ? 'border-rose-400 text-rose-200'
+                                                        : 'border-green-400 text-green-200'
                                                     }`}
                                             >
                                                 {statusTag(state)}
@@ -312,10 +312,10 @@ export default function App() {
                                             <div
                                                 key={s.id}
                                                 className={`px-3 py-1 rounded-full border transition ${active
-                                                        ? 'border-accent text-accent bg-white/5 shadow-accent/25'
-                                                        : unlocked
-                                                            ? 'border-white/10 text-slate-200'
-                                                            : 'border-white/5 text-slate-500'
+                                                    ? 'border-accent text-accent bg-white/5 shadow-accent/25'
+                                                    : unlocked
+                                                        ? 'border-white/10 text-slate-200'
+                                                        : 'border-white/5 text-slate-500'
                                                     }`}
                                             >
                                                 {idx + 1}. {s.title}

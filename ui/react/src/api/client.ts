@@ -19,8 +19,8 @@ export interface WizardApi {
     runTts: (opts: { vodUrl: string; text: string; streamer: string }) => Promise<TtsResult>;
 }
 
-const defaultBase = import.meta.env.VITE_API_BASE ?? '/api';
-const defaultUseMock = (import.meta.env.VITE_USE_MOCK ?? 'true').toLowerCase() !== 'false';
+const defaultBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8010/api';
+const defaultUseMock = (import.meta.env.VITE_USE_MOCK ?? 'false').toLowerCase() !== 'false';
 
 export function createApi(options?: { baseUrl?: string; useMock?: boolean; delayMs?: number }): WizardApi {
     const useMock = options?.useMock ?? defaultUseMock;
@@ -33,23 +33,30 @@ class HttpApi implements WizardApi {
     constructor(private readonly baseUrl: string) { }
 
     async checkVod(url: string): Promise<VodMeta> {
-        return this.post<VodMeta>('/vod/check', { url });
+        const res = await fetch(`${this.baseUrl}/vod/check?vod_url=${encodeURIComponent(url)}`, {
+            method: 'POST',
+        });
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || `Request failed (${res.status})`);
+        }
+        return (await res.json()) as VodMeta;
     }
 
     async runAudio(opts: { vodUrl: string; force: boolean; useDemucs: boolean; skipAac: boolean }): Promise<AudioResult> {
-        return this.post<AudioResult>('/audio/extract', opts);
+        return this.post<AudioResult>('/audio/run', opts);
     }
 
     async runSanitize(opts: { vodUrl: string }): Promise<SanitizeResult> {
-        return this.post<SanitizeResult>('/audio/sanitize', opts);
+        return this.post<SanitizeResult>('/sanitize/run', opts);
     }
 
     async runSrt(opts: { vodUrl: string }): Promise<SrtResult> {
-        return this.post<SrtResult>('/srt/extract', opts);
+        return this.post<SrtResult>('/srt/run', opts);
     }
 
     async runTts(opts: { vodUrl: string; text: string; streamer: string }): Promise<TtsResult> {
-        return this.post<TtsResult>('/tts/generate', opts);
+        return this.post<TtsResult>('/tts/run', opts);
     }
 
     private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {

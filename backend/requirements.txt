@@ -1,0 +1,14 @@
+# Backend Python dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+typer>=0.9.0
+faster-whisper>=1.0.0
+twitch-dl>=2.2.0
+numpy>=1.24.0
+soundfile>=0.12.0
+webrtcvad>=2.0.0
+
+# Optional: Demucs for vocal isolation
+# demucs>=4.0.0
