@@ -1,0 +1,9 @@
+faster-whisper>=1.0.0
+ctranslate2>=4.0.0
+tqdm>=4.66.0
+twitch-dl>=2.1.0
+numpy>=1.24.0
+soundfile>=0.12.1
+webrtcvad>=2.0.10
+# Optional: install demucs for source separation
+# demucs>=4.0.0

@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pkl
+*.egg-info/
+.eggs/
+.build/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.env
+.env.*
+.venv/
+.venv-*/
+
+# Node / Vite (UI)
+ui/react/node_modules/
+ui/react/dist/
+ui/react/.vite/
+ui/react/.turbo/
+ui/react/.eslintcache
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Data & outputs (local only)
+dataset/
+datasets/
+output/
+out/
+jobs/logs/
+jobs/cache/
+temp/cache/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Build / misc
+*.log
+*.tmp
+*.swp
+*.swo
