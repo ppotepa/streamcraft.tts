@@ -175,11 +175,14 @@ def ensure_cuda_dlls_available():
         log(f"Added CUDA DLLs to PATH: {', '.join(added)}")
 
 
-def download_vod(url: str, out_dir: Path, quality: str = "audio_only") -> Path:
+def download_vod(url: str, out_dir: Path, quality: str = "audio_only", force: bool = False) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     m = re.search(r"(\d{6,})", url)
     base = m.group(1) if m else "vod"
     target = out_dir / f"{base}.mp4"
+    if target.exists() and not force:
+        log(f"[i] Reusing cached VOD {target}")
+        return target
     cmd = [
         sys.executable,
         "-m",
@@ -367,7 +370,7 @@ def run_transcription(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if vod.startswith("http"):
-        media_path = download_vod(vod, out_dir, quality=vod_quality)
+        media_path = download_vod(vod, out_dir, quality=vod_quality, force=force)
     else:
         media_path = Path(vod).expanduser().resolve()
         if not media_path.exists():
