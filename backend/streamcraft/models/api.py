@@ -45,7 +45,16 @@ class SegmentPreview(BaseModel):
     start: float
     end: float
     duration: float
-    rmsDb: float
+    rmsDb: Optional[float] = None
+    quality: Optional[int] = None
+    speechRatio: Optional[float] = None
+    snrDb: Optional[float] = None
+    clipRatio: Optional[float] = None
+    sfxScore: Optional[float] = None
+    speakerSim: Optional[float] = None
+    kept: Optional[bool] = None
+    labels: List[str] = []
+    rejectReason: List[str] = []
 
 
 class RunSanitizeRequest(BaseModel):
@@ -60,11 +69,26 @@ class RunSanitizeRequest(BaseModel):
     voiceSampleMaxDuration: float = 6.0
     voiceSampleMinRmsDb: float = -35.0
     manualSamples: Optional[List[dict]] = None
-    silenceThresholdDb: float = -45.0
-    minSegmentMs: int = 800
-    mergeGapMs: int = 300
-    targetPeakDb: float = -1.0
-    fadeMs: int = 20
+
+    # legacy fields (ignored in v2 but accepted for compatibility)
+    silenceThresholdDb: Optional[float] = None
+    minSegmentMs: Optional[int] = None
+    mergeGapMs: Optional[int] = None
+    targetPeakDb: Optional[float] = None
+
+
+    # v2 controls
+    mode: Literal["auto", "voice"] = "auto"
+    preset: Literal["strict", "balanced", "lenient"] = "balanced"
+    strictness: float = 0.5
+    preview: bool = False
+    previewStart: float = 0.0
+    previewDuration: float = 90.0
+    preservePauses: bool = True
+    reduceSfx: bool = True
+    targetLufs: float = -18.0
+    truePeakLimitDb: float = -1.0
+    fadeMs: int = 12
 
 
 class RunSanitizeResponse(BaseModel):

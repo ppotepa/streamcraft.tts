@@ -7,7 +7,21 @@ export type VodMeta = {
 };
 
 export type AudioResult = { exitCode: number; path: string; log: string[] };
-export type SegmentPreview = { start: number; end: number; duration: number; rmsDb: number };
+export type SegmentPreview = {
+    start: number;
+    end: number;
+    duration: number;
+    rmsDb?: number | null;
+    quality?: number | null;
+    speechRatio?: number | null;
+    snrDb?: number | null;
+    clipRatio?: number | null;
+    sfxScore?: number | null;
+    speakerSim?: number | null;
+    kept?: boolean;
+    labels?: string[];
+    rejectReason?: string[];
+};
 export type SegmentReviewVote = { index: number; decision: 'accept' | 'reject'; segment: SegmentPreview };
 export type SegmentReviewState = {
     reviewPath?: string | null;
@@ -31,11 +45,10 @@ export type SanitizeResult = {
     previewPath: string;
     previewSampleRate: number;
     appliedSettings: {
-        silenceThresholdDb: number;
-        minSegmentMs: number;
-        mergeGapMs: number;
-        targetPeakDb: number;
-        fadeMs: number;
+        mode: 'auto' | 'voice';
+        preset: 'strict' | 'balanced' | 'lenient';
+        strictness: number;
+        params: Record<string, number>;
     };
     voiceSamples: { start: number; end: number; duration: number; rmsDb: number; path: string }[];
     log: string[];
@@ -73,18 +86,23 @@ export interface WizardApi {
     runSanitize: (
         opts: {
             vodUrl: string;
-            auto: boolean;
-            voiceSample: boolean;
-            voiceSampleCount: number;
+            mode: 'auto' | 'voice';
+            preset?: 'strict' | 'balanced' | 'lenient';
+            strictness?: number;
+            preview?: boolean;
+            previewStart?: number;
+            previewDuration?: number;
+            voiceSample?: boolean;
+            voiceSampleCount?: number;
             voiceSampleMinDuration?: number;
             voiceSampleMaxDuration?: number;
             voiceSampleMinRmsDb?: number;
-            manualSamples?: Array<{start: number; end: number}>;
-            silenceThresholdDb: number;
-            minSegmentMs: number;
-            mergeGapMs: number;
-            targetPeakDb: number;
-            fadeMs: number;
+            manualSamples?: Array<{ start: number; end: number }>;
+            preservePauses?: boolean;
+            reduceSfx?: boolean;
+            targetLufs?: number;
+            truePeakLimitDb?: number;
+            fadeMs?: number;
         }
     ) => Promise<SanitizeResult>;
     runSrt: (opts: { vodUrl: string }) => Promise<SrtResult>;
@@ -132,18 +150,23 @@ class HttpApi implements WizardApi {
 
     async runSanitize(opts: {
         vodUrl: string;
-        auto: boolean;
-        voiceSample: boolean;
-        voiceSampleCount: number;
+        mode: 'auto' | 'voice';
+        preset?: 'strict' | 'balanced' | 'lenient';
+        strictness?: number;
+        preview?: boolean;
+        previewStart?: number;
+        previewDuration?: number;
+        voiceSample?: boolean;
+        voiceSampleCount?: number;
         voiceSampleMinDuration?: number;
         voiceSampleMaxDuration?: number;
         voiceSampleMinRmsDb?: number;
-        manualSamples?: Array<{start: number; end: number}>;
-        silenceThresholdDb: number;
-        minSegmentMs: number;
-        mergeGapMs: number;
-        targetPeakDb: number;
-        fadeMs: number;
+        manualSamples?: Array<{ start: number; end: number }>;
+        preservePauses?: boolean;
+        reduceSfx?: boolean;
+        targetLufs?: number;
+        truePeakLimitDb?: number;
+        fadeMs?: number;
     }): Promise<SanitizeResult> {
         return this.post<SanitizeResult>('/sanitize/run', opts);
     }
@@ -354,30 +377,42 @@ class MockApi implements WizardApi {
 
     async runSanitize(opts: {
         vodUrl: string;
-        auto: boolean;
-        voiceSample: boolean;
-        voiceSampleCount: number;
+        mode: 'auto' | 'voice';
+        preset?: 'strict' | 'balanced' | 'lenient';
+        strictness?: number;
+        preview?: boolean;
+        previewStart?: number;
+        previewDuration?: number;
+        voiceSample?: boolean;
+        voiceSampleCount?: number;
         voiceSampleMinDuration?: number;
         voiceSampleMaxDuration?: number;
         voiceSampleMinRmsDb?: number;
-        manualSamples?: Array<{start: number; end: number}>;
-        silenceThresholdDb: number;
-        minSegmentMs: number;
-        mergeGapMs: number;
-        targetPeakDb: number;
-        fadeMs: number;
+        manualSamples?: Array<{ start: number; end: number }>;
+        preservePauses?: boolean;
+        reduceSfx?: boolean;
+        targetLufs?: number;
+        truePeakLimitDb?: number;
+        fadeMs?: number;
     }): Promise<SanitizeResult> {
         await sleep(this.delayMs);
         const vodId = extractVodId(opts.vodUrl) || '2688036561';
-        const applied = opts.auto
-            ? { silenceThresholdDb: -33, minSegmentMs: 750, mergeGapMs: 260, targetPeakDb: -1, fadeMs: 12 }
-            : {
-                silenceThresholdDb: opts.silenceThresholdDb,
-                minSegmentMs: opts.minSegmentMs,
-                mergeGapMs: opts.mergeGapMs,
-                targetPeakDb: opts.targetPeakDb,
-                fadeMs: opts.fadeMs,
-            };
+        const applied = {
+            mode: opts.mode,
+            preset: opts.preset || 'balanced',
+            strictness: typeof opts.strictness === 'number' ? opts.strictness : 0.5,
+            params: {
+                speechProbThreshold: opts.preset === 'strict' ? 0.75 : opts.preset === 'lenient' ? 0.55 : 0.65,
+                qualityMinScore: opts.preset === 'strict' ? 75 : opts.preset === 'lenient' ? 45 : 60,
+                minSegmentMs: opts.preset === 'lenient' ? 450 : opts.preset === 'strict' ? 900 : 650,
+                minSilenceMsToSplit: opts.preset === 'strict' ? 220 : opts.preset === 'lenient' ? 320 : 260,
+                hangoverMs: opts.preset === 'strict' ? 220 : opts.preset === 'lenient' ? 180 : 200,
+                preRollMs: 80,
+                postRollMs: opts.preset === 'strict' ? 220 : 200,
+                sfxPenaltyStrength: 1.0,
+                frameKeep: 0.55,
+            },
+        };
         return {
             exitCode: 0,
             cleanPath: `out/juggernautjason/audio/${vodId}.clean.wav`,
@@ -385,13 +420,13 @@ class MockApi implements WizardApi {
             segments: 120,
             cleanDuration: 1800,
             previewSegments: [
-                { start: 0, end: 4.2, duration: 4.2, rmsDb: -24 },
-                { start: 6.5, end: 14.1, duration: 7.6, rmsDb: -22 },
+                { start: 0, end: 4.2, duration: 4.2, rmsDb: -24, quality: 80, speechRatio: 0.9, snrDb: 18, clipRatio: 0.0, sfxScore: 0.1, speakerSim: 0.5, kept: true, labels: ['excellent'] },
+                { start: 6.5, end: 14.1, duration: 7.6, rmsDb: -22, quality: 65, speechRatio: 0.7, snrDb: 12, clipRatio: 0.01, sfxScore: 0.2, speakerSim: 0.5, kept: true, labels: ['good'] },
             ],
             previewPath: `out/juggernautjason/audio/${vodId}.preview.wav`,
             previewSampleRate: 24000,
             appliedSettings: applied,
-            voiceSamples: (opts.voiceSample || opts.manualSamples)
+            voiceSamples: (opts.mode === 'voice' || opts.manualSamples)
                 ? (opts.manualSamples || [
                     { start: 0, end: 5, duration: 5, rmsDb: -20, path: `out/juggernautjason/audio/${vodId}.voice_samples/sample0.wav` },
                     { start: 6, end: 11, duration: 5, rmsDb: -21, path: `out/juggernautjason/audio/${vodId}.voice_samples/sample1.wav` },

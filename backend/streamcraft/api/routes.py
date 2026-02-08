@@ -195,57 +195,56 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
     """Sanitize audio by trimming silence and normalizing speech segments."""
 
     try:
-        from streamcraft.core.pipeline import configure_temp_dir
-        from streamcraft.core.sanitize import SanitizeSettings, run_sanitize_job
+        from streamcraft.core.pipeline import configure_temp_dir, resolve_output_dirs
+        from streamcraft.core.sanitize_v2 import SanitiseConfig, SanitiseMode, SanitisePreset, run_sanitise_v2
 
         configure_temp_dir(Path.cwd())
 
         out_root = Path(request.outdir or "out")
         dataset_root = Path(request.datasetOut or "dataset")
+        _, _, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
 
-        settings = SanitizeSettings(
-            silence_threshold_db=request.silenceThresholdDb,
-            min_segment_ms=request.minSegmentMs,
-            merge_gap_ms=request.mergeGapMs,
-            target_peak_db=request.targetPeakDb,
-            fade_ms=request.fadeMs,
-        )
+        mode = SanitiseMode(request.mode) if request.mode in {"auto", "voice"} else (SanitiseMode.VOICE if request.voiceSample else SanitiseMode.AUTO)
+        preset = SanitisePreset(request.preset) if request.preset in {"strict", "balanced", "lenient"} else SanitisePreset.BALANCED
 
-        (
-            clean_path,
-            manifest_path,
-            preview_path,
-            segments,
-            sr,
-            preview_sr,
-            raw_log,
-            applied_settings,
-            voice_samples,
-        ) = run_sanitize_job(
-            request.vodUrl,
-            out_root,
-            dataset_root,
-            settings,
-            auto=request.auto,
-            voice_samples=request.voiceSample,
+        cfg = SanitiseConfig(
+            mode=mode,
+            preset=preset,
+            strictness=float(request.strictness),
+            preview=request.preview,
+            preview_start=request.previewStart,
+            preview_duration=request.previewDuration,
             voice_sample_count=request.voiceSampleCount,
             voice_sample_min_duration=request.voiceSampleMinDuration,
             voice_sample_max_duration=request.voiceSampleMaxDuration,
             voice_sample_min_rms_db=request.voiceSampleMinRmsDb,
             manual_samples=request.manualSamples,
+            preserve_pauses=request.preservePauses,
+            reduce_sfx=request.reduceSfx,
+            target_lufs=request.targetLufs,
+            true_peak_limit_db=request.truePeakLimitDb,
+            fade_ms=request.fadeMs,
         )
 
-        total_duration = sum(seg.duration for seg in segments)
+        result = run_sanitise_v2(
+            request.vodUrl,
+            out_root,
+            dataset_root,
+            cfg,
+        )
 
-        timestamped_log = []
+        segments = result.segments
+        total_duration = sum(seg.duration for seg in segments if seg.kept)
+
+        timestamped_log: list[str] = []
         now = datetime.datetime.utcnow()
-        for idx, line in enumerate(raw_log):
+        for idx, line in enumerate(result.log):
             stamp = (now + datetime.timedelta(seconds=idx)).strftime("%H:%M:%S")
             timestamped_log.append(f"[{stamp}] {line}")
 
         return RunSanitizeResponse(
-            cleanPath=to_workspace_relative(clean_path),
-            segmentsPath=to_workspace_relative(manifest_path),
+            cleanPath=to_workspace_relative(result.clean_path),
+            segmentsPath=to_workspace_relative(result.manifest_path),
             segments=len(segments),
             cleanDuration=total_duration,
             previewSegments=[
@@ -253,18 +252,26 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                     "start": seg.start,
                     "end": seg.end,
                     "duration": seg.duration,
-                    "rmsDb": seg.rms_db,
+                    "rmsDb": None,
+                    "quality": seg.quality,
+                    "speechRatio": seg.speech_ratio,
+                    "snrDb": seg.snr_db,
+                    "clipRatio": seg.clip_ratio,
+                    "sfxScore": seg.sfx_score,
+                    "speakerSim": seg.speaker_sim,
+                    "kept": seg.kept,
+                    "labels": seg.labels,
+                    "rejectReason": seg.reject_reason,
                 }
                 for seg in segments[:500]
             ],
-            previewPath=to_workspace_relative(preview_path),
-            previewSampleRate=preview_sr,
+            previewPath=to_workspace_relative(result.preview_path),
+            previewSampleRate=result.preview_sr,
             appliedSettings={
-                "silenceThresholdDb": applied_settings.silence_threshold_db,
-                "minSegmentMs": applied_settings.min_segment_ms,
-                "mergeGapMs": applied_settings.merge_gap_ms,
-                "targetPeakDb": applied_settings.target_peak_db,
-                "fadeMs": applied_settings.fade_ms,
+                "mode": cfg.mode.value,
+                "preset": cfg.preset.value,
+                "strictness": cfg.strictness,
+                "params": result.params,
             },
             voiceSamples=[
                 {
@@ -272,9 +279,9 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                     "end": vs.get("end"),
                     "duration": vs.get("duration"),
                     "rmsDb": vs.get("rmsDb"),
-                    "path": to_workspace_relative(vs.get("path")),
+                    "path": to_workspace_relative(dataset_dir / Path(vs.get("path", ""))),
                 }
-                for vs in voice_samples
+                for vs in result.voice_samples
             ],
             exitCode=0,
             log=timestamped_log,
