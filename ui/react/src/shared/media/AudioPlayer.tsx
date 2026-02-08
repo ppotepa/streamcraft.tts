@@ -19,6 +19,9 @@ interface AudioPlayerProps {
     onSegmentEnd?: () => void;
     onPlaylistEnd?: () => void;
     highlightSegment?: AudioSegment; // highlighted range overlay
+    onLoading?: (percent: number) => void;
+    onReady?: () => void;
+    onError?: (message: string) => void;
     className?: string;
 }
 
@@ -32,6 +35,9 @@ export default function AudioPlayer({
     onSegmentEnd,
     onPlaylistEnd,
     highlightSegment,
+    onLoading,
+    onReady,
+    onError,
     className = '',
 }: AudioPlayerProps) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -66,8 +72,9 @@ export default function AudioPlayer({
             barGap: mode === 'small' ? 1 : 2,
             barRadius: 2,
             height: mode === 'small' ? 32 : mode === 'compact' ? 64 : 128,
-            normalize: true,
-            backend: 'WebAudio',
+            normalize: false, // disable normalization to avoid full decode on huge files
+            backend: 'MediaElement', // stream instead of decoding entire blob into memory
+            mediaControls: false,
         });
 
         wavesurferRef.current = wavesurfer;
@@ -81,7 +88,14 @@ export default function AudioPlayer({
             }
         };
 
-        wavesurfer.on('ready', handleReady);
+        wavesurfer.on('ready', () => {
+            handleReady();
+            onReady?.();
+        });
+        wavesurfer.on('loading', (percent: number) => {
+            setIsLoading(true);
+            onLoading?.(percent);
+        });
         wavesurfer.on('play', () => setIsPlaying(true));
         wavesurfer.on('pause', () => setIsPlaying(false));
 
@@ -105,18 +119,44 @@ export default function AudioPlayer({
         });
 
         wavesurfer.on('error', (err) => {
+            // WaveSurfer emits AbortError when a load is superseded; ignore those.
+            if ((err as any)?.name === 'AbortError') {
+                return;
+            }
             console.error('WaveSurfer error:', err);
             setError('Failed to load audio');
+            onError?.('Failed to load audio');
             setIsLoading(false);
         });
 
         setIsLoading(true);
         setError(null);
-        wavesurfer.load(audioSrc);
+        const loadPromise = wavesurfer.load(audioSrc);
+        // Swallow AbortError from load when component unmounts mid-request
+        loadPromise.catch((err) => {
+            if ((err as any)?.name === 'AbortError') return;
+            console.error('WaveSurfer load error:', err);
+            setError('Failed to load audio');
+            onError?.('Failed to load audio');
+            setIsLoading(false);
+        });
 
         return () => {
-            wavesurfer.destroy();
-            wavesurferRef.current = null;
+            try {
+                wavesurfer.unAll();
+                // Wrap destroy in Promise.resolve() to catch both sync and async rejections
+                void Promise.resolve(wavesurfer.destroy()).catch((err) => {
+                    if ((err as any)?.name === 'AbortError') return;
+                    console.debug('WaveSurfer destroy error:', err);
+                });
+            } catch (e) {
+                // Catch synchronous throws during unAll/destroy
+                if ((e as any)?.name !== 'AbortError') {
+                    console.debug('WaveSurfer cleanup error:', e);
+                }
+            } finally {
+                wavesurferRef.current = null;
+            }
         };
     }, [audioSrc, mode]);
 

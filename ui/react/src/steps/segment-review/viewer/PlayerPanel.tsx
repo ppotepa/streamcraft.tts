@@ -24,12 +24,15 @@ interface PlayerPanelProps {
     playToken: number;
     onAccept: () => void;
     onReject: () => void;
+    onAudioLoading?: (percent: number) => void;
+    onAudioReady?: () => void;
+    onAudioError?: (message: string) => void;
 }
 
 /**
  * Audio player with accept/reject controls and transcript display.
  */
-export function PlayerPanel({ current, vote, transcript, audioSrc, playToken, onAccept, onReject }: PlayerPanelProps) {
+export function PlayerPanel({ current, vote, transcript, audioSrc, playToken, onAccept, onReject, onAudioLoading, onAudioReady, onAudioError }: PlayerPanelProps) {
     // Memoize segment to prevent unnecessary re-creation with same values
     const currentAudioSegment: AudioSegment | undefined = React.useMemo(
         () => current ? { start: current.start, end: current.end, label: `Segment #${current.index}` } : undefined,
@@ -46,6 +49,9 @@ export function PlayerPanel({ current, vote, transcript, audioSrc, playToken, on
                 playToken={playToken}
                 highlightSegment={currentAudioSegment}
                 onSegmentEnd={() => { }}
+                onLoading={onAudioLoading}
+                onReady={onAudioReady}
+                onError={onAudioError}
             />
 
             <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-5 space-y-4">

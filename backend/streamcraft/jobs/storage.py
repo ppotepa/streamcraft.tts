@@ -96,7 +96,7 @@ def create_job(vod_url: str, streamer: str, title: str) -> JobResponse:
         "title": title,
         "createdAt": now,
         "updatedAt": now,
-        "steps": {"vod": False, "audio": False, "sanitize": False, "srt": False, "tts": False},
+        "steps": {"vod": False, "audio": False, "sanitize": False, "srt": False, "train": False, "tts": False},
         "outputs": {},
     }
     

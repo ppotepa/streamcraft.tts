@@ -59,6 +59,65 @@ def _compute_rms_envelope(audio: np.ndarray, frame_samples: int) -> np.ndarray:
 	return rms.astype(np.float32)
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+	return max(low, min(high, value))
+
+
+def estimate_settings(audio: np.ndarray, sr: int, base: SanitizeSettings | None = None) -> SanitizeSettings:
+	"""Derive reasonable sanitize settings from audio stats.
+
+	Uses a short RMS scan to infer noise floor and typical speech cadence, then
+	chooses threshold/segment/gap values that should work well for conversational speech.
+	"""
+	base = base or SanitizeSettings()
+	mono = _to_mono(audio)
+	frame_ms = 50
+	frame_samples = max(1, int(sr * frame_ms / 1000))
+	rms = _compute_rms_envelope(mono, frame_samples)
+	if rms.size == 0:
+		return base
+
+	rms_db = 20 * np.log10(rms + 1e-9)
+	noise_floor_db = float(np.percentile(rms_db, 20))
+	speech_peak_db = float(np.percentile(rms_db, 90))
+
+	# Threshold: a bit above noise, but not so high we cut soft speech
+	threshold_db = _clamp(noise_floor_db + 6.0, -55.0, speech_peak_db - 6.0)
+	if math.isnan(threshold_db):
+		threshold_db = base.silence_threshold_db
+
+	# Derive cadence stats to set min segment and merge gap
+	mask = rms_db >= threshold_db
+	frame_duration = frame_samples / sr
+	segments: List[Segment] = []
+	start_idx = None
+	for idx, active in enumerate(mask):
+		if active and start_idx is None:
+			start_idx = idx
+		elif not active and start_idx is not None:
+			segments.append((start_idx, idx))
+			start_idx = None
+	if start_idx is not None:
+		segments.append((start_idx, len(mask)))
+
+	if segments:
+		durations_ms = [max(1.0, (end - start) * frame_duration * 1000.0) for start, end in segments]
+		gaps_ms = [max(1.0, (segments[i][0] - segments[i - 1][1]) * frame_duration * 1000.0) for i in range(1, len(segments))]
+		min_seg_ms = int(_clamp(np.percentile(durations_ms, 25), 300.0, 1800.0))
+		merge_gap_ms = int(_clamp(np.percentile(gaps_ms, 50) if gaps_ms else 300.0, 120.0, 900.0))
+	else:
+		min_seg_ms = base.min_segment_ms
+		merge_gap_ms = base.merge_gap_ms
+
+	return SanitizeSettings(
+		silence_threshold_db=float(threshold_db),
+		min_segment_ms=int(min_seg_ms),
+		merge_gap_ms=int(merge_gap_ms),
+		target_peak_db=base.target_peak_db,
+		fade_ms=base.fade_ms,
+	)
+
+
 def detect_segments(audio: np.ndarray, sr: int, settings: SanitizeSettings) -> List[Segment]:
 	mono = _to_mono(audio)
 	frame_ms = 50
@@ -188,7 +247,15 @@ def sanitize_audio(
 	clean_path: Path,
 	manifest_path: Path,
 	settings: SanitizeSettings,
-) -> Tuple[Path, Path, Path, List[Segment], int, int, List[str]]:
+	auto: bool = False,
+	voice_samples_dir: Path | None = None,
+	voice_sample_count: int = 0,
+	voice_sample_max_sec: float = 6.0,
+	voice_sample_min_duration: float = 2.0,
+	voice_sample_max_duration: float = 6.0,
+	voice_sample_min_rms_db: float = -35.0,
+	manual_samples: List[Dict] | None = None,
+) -> Tuple[Path, Path, Path, List[Segment], int, int, List[str], SanitizeSettings, List[Dict]]:
 	log: List[str] = []
 
 	def emit(msg: str) -> None:
@@ -200,6 +267,16 @@ def sanitize_audio(
 	emit(f"Loading audio {input_wav}")
 	audio, sr = _load_audio(input_wav)
 	emit(f"Loaded waveform sr={sr} hz, duration={len(audio)/sr:.2f}s")
+
+	if auto:
+		auto_settings = estimate_settings(audio, sr, settings)
+		emit(
+			"Auto settings -> "
+			f"silence_threshold_db={auto_settings.silence_threshold_db:.1f}, "
+			f"min_segment_ms={auto_settings.min_segment_ms}, merge_gap_ms={auto_settings.merge_gap_ms}, "
+			f"target_peak_db={auto_settings.target_peak_db}, fade_ms={auto_settings.fade_ms}"
+		)
+		settings = auto_settings
 
 	segments = detect_segments(audio, sr, settings)
 	emit(f"Detected {len(segments)} speech segments")
@@ -217,7 +294,123 @@ def sanitize_audio(
 	emit(f"Writing manifest {manifest_path}")
 	write_manifest(segments, sr, input_wav, manifest_path)
 
-	return clean_path, manifest_path, preview_path, segments, sr, PREVIEW_SAMPLE_RATE, log
+	voice_samples: List[Dict] = []
+	if voice_samples_dir:
+		voice_samples_dir.mkdir(parents=True, exist_ok=True)
+		if manual_samples and voice_sample_count > 0:
+			# Use manual samples as references to find similar segments
+			emit(f"Analyzing {len(manual_samples)} reference region(s) to find similar clips")
+			
+			# Extract characteristics from reference regions
+			ref_durations = []
+			ref_rms_dbs = []
+			for sample_spec in manual_samples:
+				start_sec = sample_spec.get("start", 0.0)
+				end_sec = sample_spec.get("end", 0.0)
+				start_idx = max(0, int(start_sec * sr))
+				end_idx = min(len(audio), int(end_sec * sr))
+				if end_idx <= start_idx:
+					continue
+				snip = _to_mono(audio[start_idx:end_idx].copy())
+				if snip.size == 0:
+					continue
+				duration = end_sec - start_sec
+				rms = float(np.sqrt(np.mean(snip**2)))
+				rms_db = 20 * np.log10(rms + 1e-10)
+				ref_durations.append(duration)
+				ref_rms_dbs.append(rms_db)
+			
+			if ref_durations:
+				# Use reference characteristics or slider overrides
+				target_min_duration = max(voice_sample_min_duration, min(ref_durations) * 0.8)
+				target_max_duration = min(voice_sample_max_duration, max(ref_durations) * 1.2)
+				target_min_rms = max(voice_sample_min_rms_db, min(ref_rms_dbs) - 3)
+				
+				emit(f"Reference characteristics: duration {target_min_duration:.1f}-{target_max_duration:.1f}s, RMS ≥{target_min_rms:.1f} dB")
+				
+				# Find similar segments
+				candidates = [
+					seg for seg in segments
+					if target_min_duration <= seg.duration <= target_max_duration
+					and seg.rms_db >= target_min_rms
+				]
+				candidates = sorted(candidates, key=lambda s: (s.duration, s.rms_db), reverse=True)[:voice_sample_count]
+				emit(f"Found {len(candidates)} similar segments")
+				
+				for idx, seg in enumerate(candidates):
+					start_idx = max(0, int(seg.start * sr))
+					end_idx = min(len(audio), int(min(seg.end, seg.start + voice_sample_max_sec) * sr))
+					if end_idx <= start_idx:
+						continue
+					snip = _to_mono(audio[start_idx:end_idx].copy())
+					if snip.size == 0:
+						continue
+					target = voice_samples_dir / f"voice_sample_{idx:02d}.wav"
+					sf.write(str(target), snip.astype(np.float32), sr)
+					voice_samples.append(
+						{
+							"start": seg.start,
+							"end": seg.end,
+							"duration": seg.duration,
+							"rmsDb": seg.rms_db,
+							"path": target,
+						}
+					)
+		elif manual_samples:
+			# Extract manual samples directly (no similarity search)
+			for idx, sample_spec in enumerate(manual_samples):
+				start_sec = sample_spec.get("start", 0.0)
+				end_sec = sample_spec.get("end", 0.0)
+				start_idx = max(0, int(start_sec * sr))
+				end_idx = min(len(audio), int(end_sec * sr))
+				if end_idx <= start_idx:
+					continue
+				snip = _to_mono(audio[start_idx:end_idx].copy())
+				if snip.size == 0:
+					continue
+				rms = float(np.sqrt(np.mean(snip**2)))
+				rms_db = 20 * np.log10(rms + 1e-10)
+				target = voice_samples_dir / f"voice_sample_{idx:02d}.wav"
+				sf.write(str(target), snip.astype(np.float32), sr)
+				voice_samples.append(
+					{
+						"start": start_sec,
+						"end": end_sec,
+						"duration": end_sec - start_sec,
+						"rmsDb": float(rms_db),
+						"path": target,
+					}
+				)
+		elif voice_sample_count > 0:
+			# Auto-generate samples from top segments with filters
+			candidates = [
+				seg for seg in segments
+				if voice_sample_min_duration <= seg.duration <= voice_sample_max_duration
+				and seg.rms_db >= voice_sample_min_rms_db
+			]
+			# Sort by duration first (prefer longer), then by RMS (prefer louder)
+			candidates = sorted(candidates, key=lambda s: (s.duration, s.rms_db), reverse=True)[:voice_sample_count]
+			for idx, seg in enumerate(candidates):
+				start_idx = max(0, int(seg.start * sr))
+				end_idx = min(len(audio), int(min(seg.end, seg.start + voice_sample_max_sec) * sr))
+				if end_idx <= start_idx:
+					continue
+				snip = _to_mono(audio[start_idx:end_idx].copy())
+				if snip.size == 0:
+					continue
+				target = voice_samples_dir / f"voice_sample_{idx:02d}.wav"
+				sf.write(str(target), snip.astype(np.float32), sr)
+				voice_samples.append(
+					{
+						"start": seg.start,
+						"end": seg.end,
+						"duration": seg.duration,
+						"rmsDb": seg.rms_db,
+						"path": target,
+					}
+				)
+
+	return clean_path, manifest_path, preview_path, segments, sr, PREVIEW_SAMPLE_RATE, log, settings, voice_samples
 
 
 def run_sanitize_job(
@@ -225,7 +418,14 @@ def run_sanitize_job(
 	out_root: Path,
 	dataset_root: Path,
 	settings: SanitizeSettings | None = None,
-) -> Tuple[Path, Path, Path, List[Segment], int, int, List[str]]:
+	auto: bool = False,
+	voice_samples: bool = False,
+	voice_sample_count: int = 5,
+	voice_sample_min_duration: float = 2.0,
+	voice_sample_max_duration: float = 6.0,
+	voice_sample_min_rms_db: float = -35.0,
+	manual_samples: List[Dict] | None = None,
+) -> Tuple[Path, Path, Path, List[Segment], int, int, List[str], SanitizeSettings, List[Dict]]:
 	settings = settings or SanitizeSettings()
 
 	_, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
@@ -233,5 +433,18 @@ def run_sanitize_job(
 	input_audio = vod_dir / f"{vod_slug}_full.wav"
 	clean_path = vod_dir / f"{vod_slug}_clean.wav"
 	manifest_path = dataset_dir / f"{vod_slug}_segments.json"
+	voice_samples_dir = dataset_dir / "voice_samples"
 
-	return sanitize_audio(input_audio, clean_path, manifest_path, settings)
+	return sanitize_audio(
+		input_audio,
+		clean_path,
+		manifest_path,
+		settings,
+		auto=auto,
+		voice_samples_dir=voice_samples_dir if (voice_samples or manual_samples) else None,
+		voice_sample_count=voice_sample_count if voice_samples else 0,
+		voice_sample_min_duration=voice_sample_min_duration,
+		voice_sample_max_duration=voice_sample_max_duration,
+		voice_sample_min_rms_db=voice_sample_min_rms_db,
+		manual_samples=manual_samples,
+	)

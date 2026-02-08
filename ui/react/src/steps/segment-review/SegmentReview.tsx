@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from '../../shared/utils';
 import { SegmentViewer } from './viewer';
 import { AcceptedList, TranscriptJob } from './sidebar';
@@ -45,10 +45,16 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
     const [transcripts, setTranscripts] = useState<Record<number, TranscriptJob>>({});
     const [playToken, setPlayToken] = useState(0);
     const [autopilotMode, setAutopilotMode] = useState(false);
+    const [audioLoading, setAudioLoading] = useState(false);
+    const [audioLoadingPct, setAudioLoadingPct] = useState<number | null>(null);
+    const [audioSizeBytes, setAudioSizeBytes] = useState<number | null>(null);
+    const audioLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const current = normalizedSegments[currentIdx];
     const acceptedCount = Object.values(votes).filter((v) => v === 'accept').length;
     const rejectedCount = Object.values(votes).filter((v) => v === 'reject').length;
+
+    const formatMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
 
     // Reset state when segments change
     useEffect(() => {
@@ -120,6 +126,74 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
         }));
     };
 
+    // Fetch audio size once per audioSrc to display MB progress; try HEAD then Range fallback
+    useEffect(() => {
+        setAudioSizeBytes(null);
+        if (!audioSrc) return;
+        const controller = new AbortController();
+        let settled = false;
+
+        const parseSize = (resp: Response) => {
+            const len = resp.headers.get('content-length');
+            if (len) {
+                const parsed = Number(len);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    setAudioSizeBytes(parsed);
+                    settled = true;
+                }
+            }
+            if (!settled) {
+                const range = resp.headers.get('content-range');
+                if (range) {
+                    const match = range.match(/\/(\d+)$/);
+                    if (match && match[1]) {
+                        const parsed = Number(match[1]);
+                        if (Number.isFinite(parsed) && parsed > 0) {
+                            setAudioSizeBytes(parsed);
+                            settled = true;
+                        }
+                    }
+                }
+            }
+        };
+
+        const tryRange = () =>
+            fetch(audioSrc, {
+                method: 'GET',
+                headers: { Range: 'bytes=0-0' },
+                signal: controller.signal,
+            })
+                .then((resp) => {
+                    if (controller.signal.aborted) return;
+                    parseSize(resp);
+                })
+                .catch((err) => {
+                    if (controller.signal.aborted) return;
+                    if ((err as any)?.name === 'AbortError') return;
+                    console.debug('Audio size range fetch failed', err);
+                });
+
+        fetch(audioSrc, { method: 'HEAD', signal: controller.signal })
+            .then((resp) => {
+                if (controller.signal.aborted) return;
+                parseSize(resp);
+                if (!settled) {
+                    return tryRange();
+                }
+                return undefined;
+            })
+            .catch((err) => {
+                if (controller.signal.aborted) return;
+                if ((err as any)?.name === 'AbortError') return;
+                console.debug('Audio size HEAD failed', err);
+                tryRange();
+            });
+
+        return () => {
+            controller.abort();
+        };
+    }, [audioSrc]);
+
     // Keyboard shortcuts
     useHotkeys({
         Escape: (e) => {
@@ -167,8 +241,8 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
                     </div>
                     <button
                         className={`px-3 py-1.5 rounded border text-xs font-semibold transition ${autopilotMode
-                                ? 'border-accent bg-accent/20 text-accent shadow-[0_0_10px_rgba(56,189,248,0.3)]'
-                                : 'border-slate-700 text-slate-300 hover:border-accent hover:text-accent'
+                            ? 'border-accent bg-accent/20 text-accent shadow-[0_0_10px_rgba(56,189,248,0.3)]'
+                            : 'border-slate-700 text-slate-300 hover:border-accent hover:text-accent'
                             }`}
                         onClick={() => setAutopilotMode(!autopilotMode)}
                         title="Auto-advance to next segment after Accept/Reject"
@@ -195,6 +269,7 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
                 <SegmentViewer
                     segments={normalizedSegments}
                     playingIdx={playingIdx}
+                    currentIdx={currentIdx}
                     votes={votes}
                     transcripts={transcripts}
                     audioSrc={audioSrc}
@@ -203,6 +278,34 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
                     onSelect={jumpTo}
                     onAccept={handleAccept}
                     onReject={handleReject}
+                    onAudioLoading={(pct) => {
+                        setAudioLoading(true);
+                        setAudioLoadingPct(pct ?? 0);
+                        if (audioLoadingTimerRef.current) {
+                            clearTimeout(audioLoadingTimerRef.current);
+                        }
+                        // Fallback: auto-hide after 20s if ready/error not fired (network aborts etc.)
+                        audioLoadingTimerRef.current = setTimeout(() => {
+                            setAudioLoading(false);
+                            setAudioLoadingPct(null);
+                        }, 20000);
+                    }}
+                    onAudioReady={() => {
+                        setAudioLoading(false);
+                        setAudioLoadingPct(null);
+                        if (audioLoadingTimerRef.current) {
+                            clearTimeout(audioLoadingTimerRef.current);
+                            audioLoadingTimerRef.current = null;
+                        }
+                    }}
+                    onAudioError={() => {
+                        setAudioLoading(false);
+                        setAudioLoadingPct(null);
+                        if (audioLoadingTimerRef.current) {
+                            clearTimeout(audioLoadingTimerRef.current);
+                            audioLoadingTimerRef.current = null;
+                        }
+                    }}
                 />
                 <AcceptedList
                     segments={acceptedSegments}
@@ -212,6 +315,37 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
                     onTranscriptChange={handleTranscriptChange}
                 />
             </div>
+
+            {audioLoading && (
+                <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="w-[320px] rounded-xl border border-slate-800 bg-slate-900/90 p-4 space-y-3 text-sm text-slate-200 shadow-xl">
+                        <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                            <span>Ładowanie audio…</span>
+                        </div>
+                        <div className="text-xs text-slate-400">Duży plik może chwilę potrwać. Nie zamykaj okna.</div>
+                        {audioLoadingPct !== null && (
+                            <div className="space-y-1">
+                                <div className="h-2 w-full rounded bg-slate-800 overflow-hidden">
+                                    <div
+                                        className="h-full bg-accent transition-all"
+                                        style={{ width: `${Math.max(0, Math.min(100, audioLoadingPct))}%` }}
+                                    />
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                    Postęp: {audioLoadingPct.toFixed(0)}%
+                                    {audioSizeBytes && audioSizeBytes > 0 && (
+                                        <>
+                                            {' '}
+                                            · {formatMb((audioLoadingPct / 100) * audioSizeBytes)} MB z {formatMb(audioSizeBytes)} MB
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import soundfile as sf
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from streamcraft.models.api import (
     VodMetaResponse,
@@ -21,6 +21,8 @@ from streamcraft.models.api import (
     RunSrtResponse,
     RunTtsRequest,
     RunTtsResponse,
+    RunTrainRequest,
+    RunTrainResponse,
     SaveSegmentReviewRequest,
     SaveSegmentReviewResponse,
     GetSegmentReviewResponse,
@@ -40,22 +42,21 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 @router.post("/vod/check")
 async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
     """Check VOD and return metadata from Twitch."""
-    
     try:
         # Import inside try to catch missing twitchdl gracefully
         from twitchdl import twitch, utils  # type: ignore
-        
+
         if not vod_url.startswith("http"):
             raise HTTPException(status_code=400, detail="Only Twitch URLs supported for metadata fetch")
-        
+
         vid = utils.parse_video_identifier(vod_url)
         if not vid:
             raise HTTPException(status_code=400, detail="Invalid Twitch VOD URL")
-        
+
         video = twitch.get_video(vid)
         if not video:
             raise HTTPException(status_code=404, detail="VOD not found on Twitch")
-        
+
         owner = video.get("owner") or {}
         streamer = owner.get("login") or owner.get("displayName") or "unknown"
         title = video.get("title") or "Untitled VOD"
@@ -68,7 +69,7 @@ async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
         minutes = (duration_sec % 3600) // 60
         seconds = duration_sec % 60
         duration = f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-        
+
         # Get thumbnail - Twitch provides previewUrlTemplate with {width}x{height}
         thumb_list = video.get("thumbnailURLs") or []
         preview_template = video.get("previewThumbnailURL") or (thumb_list[0] if thumb_list else "")
@@ -76,7 +77,7 @@ async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
             preview_url = preview_template.replace("{width}", "640").replace("{height}", "360")
         else:
             preview_url = preview_template or f"https://static-cdn.jtvnw.net/cf_vods/d{vid[1:]}/thumb/thumb0-640x360.jpg"
-        
+
         return VodMetaResponse(
             streamer=streamer,
             vodId=vid,
@@ -84,7 +85,7 @@ async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
             duration=duration,
             previewUrl=preview_url,
         )
-        
+
     except ImportError:
         raise HTTPException(status_code=500, detail="twitchdl not installed")
     except Exception as e:
@@ -218,11 +219,20 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             sr,
             preview_sr,
             raw_log,
+            applied_settings,
+            voice_samples,
         ) = run_sanitize_job(
             request.vodUrl,
             out_root,
             dataset_root,
             settings,
+            auto=request.auto,
+            voice_samples=request.voiceSample,
+            voice_sample_count=request.voiceSampleCount,
+            voice_sample_min_duration=request.voiceSampleMinDuration,
+            voice_sample_max_duration=request.voiceSampleMaxDuration,
+            voice_sample_min_rms_db=request.voiceSampleMinRmsDb,
+            manual_samples=request.manualSamples,
         )
 
         total_duration = sum(seg.duration for seg in segments)
@@ -249,6 +259,23 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             ],
             previewPath=to_workspace_relative(preview_path),
             previewSampleRate=preview_sr,
+            appliedSettings={
+                "silenceThresholdDb": applied_settings.silence_threshold_db,
+                "minSegmentMs": applied_settings.min_segment_ms,
+                "mergeGapMs": applied_settings.merge_gap_ms,
+                "targetPeakDb": applied_settings.target_peak_db,
+                "fadeMs": applied_settings.fade_ms,
+            },
+            voiceSamples=[
+                {
+                    "start": vs.get("start"),
+                    "end": vs.get("end"),
+                    "duration": vs.get("duration"),
+                    "rmsDb": vs.get("rmsDb"),
+                    "path": to_workspace_relative(vs.get("path")),
+                }
+                for vs in voice_samples
+            ],
             exitCode=0,
             log=timestamped_log,
         )
@@ -282,6 +309,108 @@ def _load_manifest(manifest_path: Path) -> dict:
         return json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Corrupted manifest: {exc}")
+
+
+@router.post("/train/run")
+async def run_train(request: RunTrainRequest) -> RunTrainResponse:
+    """Slice sanitized audio + SRT into a voice dataset."""
+    try:
+        from streamcraft.core.pipeline import resolve_output_dirs, configure_temp_dir
+        from streamcraft.core.dataset import run_dataset
+        import shutil
+        import subprocess
+
+        configure_temp_dir(Path.cwd())
+
+        out_root = Path(request.outdir or "out")
+        dataset_root = Path(request.datasetOut or "dataset")
+        streamer_slug, vod_dir, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
+        vod_slug = vod_dir.name
+
+        clean_audio = vod_dir / f"{vod_slug}_clean.wav"
+        srt_path = vod_dir / f"{vod_slug}.srt"
+        clips_dir = dataset_dir / "clips"
+        manifest_csv = dataset_dir / "manifest.csv"
+        segments_json = dataset_dir / "segments.json"
+
+        if not clean_audio.exists():
+            raise HTTPException(status_code=400, detail="Clean audio missing; run Sanitize first")
+        if not srt_path.exists():
+            raise HTTPException(status_code=400, detail="SRT missing; run SRT first")
+
+        log_buffer: list[str] = []
+
+        def add_log(msg: str):
+            stamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+            log_buffer.append(f"[{stamp}] {msg}")
+
+        add_log(f"Streamer bucket: {streamer_slug}")
+        add_log(f"Dataset dir: {dataset_dir}")
+        add_log(f"Input audio: {clean_audio}")
+        add_log(f"SRT: {srt_path}")
+
+        run_dataset(
+            input_audio=clean_audio,
+            srt_path=srt_path,
+            out_dir=dataset_dir,
+            use_demucs=False,
+            min_speech_ms=request.minSpeechMs,
+            max_clip_sec=request.maxClipSec,
+            pad_ms=request.padMs,
+            merge_gap_ms=request.mergeGapMs,
+            min_rms_db=None,
+            threads=request.threads,
+            force=request.force,
+            clip_aac=request.clipAac,
+            clip_aac_bitrate=request.clipAacBitrate,
+        )
+
+        add_log("Clips sliced from clean audio")
+
+        # Copy the clean WAV into the dataset folder for reference
+        copied_clean = dataset_dir / f"{vod_slug}_clean.wav"
+        try:
+            shutil.copyfile(clean_audio, copied_clean)
+            add_log(f"Copied clean WAV -> {copied_clean}")
+        except Exception as exc:
+            add_log(f"WARN: could not copy clean WAV: {exc}")
+
+        if request.clipAac:
+            aac_path = dataset_dir / f"{vod_slug}_clean.m4a"
+            try:
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(clean_audio),
+                    "-vn",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    f"{request.clipAacBitrate}k",
+                    str(aac_path),
+                ]
+                subprocess.run(cmd, check=True, capture_output=True)
+                add_log(f"Exported AAC reference -> {aac_path}")
+            except Exception as exc:
+                add_log(f"WARN: AAC export failed: {exc}")
+
+        clip_count = len(list(clips_dir.glob("*.wav"))) + len(list(clips_dir.glob("*.m4a")))
+        add_log(f"Clip count: {clip_count}")
+
+        return RunTrainResponse(
+            datasetPath=to_workspace_relative(dataset_dir),
+            clipsDir=to_workspace_relative(clips_dir),
+            manifestPath=to_workspace_relative(manifest_csv),
+            segmentsPath=to_workspace_relative(segments_json),
+            exitCode=0,
+            log=log_buffer,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Training failed: {exc}")
 
 
 @router.get("/sanitize/review")
@@ -455,6 +584,8 @@ async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
             log_buffer.append(entry)
             print(entry)
 
+        capture_log(f"SRT start vod={vod_url} out_dir={vod_dir}")
+
         # Mock the log functions to capture output
         import streamcraft.core.transcribe as transcribe_module
         original_log = transcribe_module.log
@@ -483,7 +614,9 @@ async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
             transcribe_module.log = original_log
             transcribe_module.log_ok = original_log_ok
 
+        capture_log(f"Transcription result: media={result.get('media')} audio={result.get('audio_full')}")
         srt_path = Path(result["srt"])
+        capture_log(f"SRT path: {srt_path}")
         if not srt_path.exists():
             raise HTTPException(status_code=500, detail="SRT file not created")
 
@@ -500,23 +633,30 @@ async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
         )
 
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+        import traceback
+
+        tb = traceback.format_exc()
+        print(f"[srt] exception: {exc}\n{tb}")
+        # Return last traceback line to help identify Errno/filename/device issues in UI
+        last = tb.strip().splitlines()[-1] if tb else str(exc)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc} | {last}")
 
 
 @router.post("/tts/run")
-async def run_tts(request: RunTtsRequest) -> RunTtsResponse:
-    """Generate TTS output using XTTS v2."""
+async def run_tts(request: RunTtsRequest):
+    """Generate TTS output using XTTS v2. Supports streaming logs when stream=True."""
     try:
         from streamcraft.core.pipeline import resolve_output_dirs
         import subprocess
         import sys
+        import asyncio
 
         out_root = Path(request.outdir or "out")
         dataset_root = Path(request.datasetOut or "dataset")
         _, vod_dir, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
 
-        # Find dataset clips for the streamer
-        streamer_dataset = dataset_dir / request.streamer
+        # dataset_dir already points to the streamer bucket
+        streamer_dataset = dataset_dir.resolve()
         if not streamer_dataset.exists():
             raise HTTPException(status_code=404, detail=f"Dataset not found for streamer: {request.streamer}")
 
@@ -524,22 +664,11 @@ async def run_tts(request: RunTtsRequest) -> RunTtsResponse:
         if not clips_dir.exists():
             raise HTTPException(status_code=404, detail="No clips directory found in dataset")
 
-        # Output path
-        output_dir = Path("output")
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Output path under out/<streamer>/tts
+        tts_dir = (out_root / request.streamer / "tts").resolve()
+        tts_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        output_path = output_dir / f"tts_{request.streamer}_{timestamp}.wav"
-
-        log_buffer = []
-
-        def add_log(msg: str):
-            timestamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
-            entry = f"[{timestamp}] {msg}"
-            log_buffer.append(entry)
-
-        add_log("Starting TTS generation...")
-        add_log(f"Streamer dataset: {streamer_dataset}")
-        add_log(f"Text: {request.text}")
+        output_path = (tts_dir / f"tts_{request.streamer}_{timestamp}.wav").resolve()
 
         # Call the PowerShell TTS script
         ps_script = WORKSPACE_ROOT / "scripts" / "tts-generate.ps1"
@@ -559,36 +688,95 @@ async def run_tts(request: RunTtsRequest) -> RunTtsResponse:
             "-Language", "en"
         ]
 
-        add_log(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=300  # 5 minute timeout
-        )
+        if not request.stream:
+            log_buffer = []
 
-        # Capture PowerShell output
-        if result.stdout:
-            for line in result.stdout.split('\n'):
-                if line.strip():
-                    add_log(line.strip())
+            def add_log(msg: str):
+                timestamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+                entry = f"[{timestamp}] {msg}"
+                log_buffer.append(entry)
 
-        if result.returncode != 0:
-            error_msg = result.stderr or "TTS generation failed"
-            add_log(f"ERROR: {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
+            add_log("Starting TTS generation...")
+            add_log(f"Streamer dataset: {streamer_dataset}")
+            add_log(f"Clips dir: {clips_dir}")
+            add_log(f"Text: {request.text}")
+            add_log(f"Output: {output_path}")
+            add_log(f"Running: {' '.join(cmd)}")
 
-        if not output_path.exists():
-            raise HTTPException(status_code=500, detail="TTS output file not created")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=600,
+            )
 
-        add_log(f"TTS generated successfully: {output_path}")
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        add_log(line.strip())
+            if result.stderr:
+                for line in result.stderr.split('\n'):
+                    if line.strip():
+                        add_log(f"stderr: {line.strip()}")
 
-        return RunTtsResponse(
-            outputPath=to_workspace_relative(output_path),
-            exitCode=result.returncode,
-            log=log_buffer,
-        )
+            if result.returncode != 0:
+                error_msg = result.stderr or "TTS generation failed"
+                add_log(f"ERROR: {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+            if not output_path.exists():
+                add_log("TTS process completed but output file missing")
+                err_tail = None
+                if result.stderr:
+                    lines = [ln for ln in result.stderr.split("\n") if ln.strip()]
+                    err_tail = lines[-1] if lines else None
+                raise HTTPException(status_code=500, detail=err_tail or "TTS output file not created")
+
+            add_log(f"TTS generated successfully: {output_path}")
+
+            return RunTtsResponse(
+                outputPath=to_workspace_relative(output_path),
+                exitCode=result.returncode,
+                log=log_buffer,
+            )
+
+        # Streaming mode
+        async def stream_logs():
+            start = datetime.datetime.utcnow().strftime("%H:%M:%S")
+            yield json.dumps({"type": "log", "line": f"[{start}] Starting TTS generation..."}) + "\n"
+            yield json.dumps({"type": "log", "line": f"[{start}] Streamer dataset: {streamer_dataset}"}) + "\n"
+            yield json.dumps({"type": "log", "line": f"[{start}] Clips dir: {clips_dir}"}) + "\n"
+            yield json.dumps({"type": "log", "line": f"[{start}] Text: {request.text}"}) + "\n"
+            yield json.dumps({"type": "log", "line": f"[{start}] Output: {output_path}"}) + "\n"
+            yield json.dumps({"type": "log", "line": f"[{start}] Running: {' '.join(cmd)}"}) + "\n"
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+            assert process.stdout is not None
+            async for raw_line in process.stdout:
+                line = raw_line.decode(errors="ignore").rstrip("\n")
+                if line:
+                    yield json.dumps({"type": "log", "line": line}) + "\n"
+
+            code = await process.wait()
+
+            if not output_path.exists():
+                err_line = f"TTS output missing (code={code})"
+                yield json.dumps({"type": "error", "exitCode": code, "error": err_line}) + "\n"
+                return
+
+            yield json.dumps({
+                "type": "done",
+                "exitCode": code,
+                "outputPath": to_workspace_relative(output_path),
+            }) + "\n"
+
+        return StreamingResponse(stream_logs(), media_type="application/x-ndjson")
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="TTS generation timed out")
@@ -659,7 +847,7 @@ def to_workspace_relative(path_value: Path) -> str:
     return rel.as_posix()
 
 
-@router.get("/artifact")
+@router.api_route("/artifact", methods=["GET", "HEAD"])
 async def get_artifact(path: str = Query(..., description="Relative path to fetch under workspace")):
     target = resolve_artifact_path(path)
     media_type = "application/octet-stream"

@@ -53,6 +53,13 @@ class RunSanitizeRequest(BaseModel):
     vodUrl: str
     outdir: str = "out"
     datasetOut: str = "dataset"
+    auto: bool = True
+    voiceSample: bool = False
+    voiceSampleCount: int = 5
+    voiceSampleMinDuration: float = 2.0
+    voiceSampleMaxDuration: float = 6.0
+    voiceSampleMinRmsDb: float = -35.0
+    manualSamples: Optional[List[dict]] = None
     silenceThresholdDb: float = -45.0
     minSegmentMs: int = 800
     mergeGapMs: int = 300
@@ -69,6 +76,8 @@ class RunSanitizeResponse(BaseModel):
     previewSegments: List[SegmentPreview] = []
     previewPath: str
     previewSampleRate: int
+    appliedSettings: dict
+    voiceSamples: List[dict] = []
     exitCode: int
     log: List[str] = []
 
@@ -150,6 +159,7 @@ class RunTtsRequest(BaseModel):
     datasetOut: str = "dataset"
     text: str
     streamer: str
+    stream: bool = False
 
 
 class RunTtsResponse(BaseModel):
@@ -161,12 +171,38 @@ class RunTtsResponse(BaseModel):
     log: List[str] = []
 
 
+class RunTrainRequest(BaseModel):
+    """Voice dataset training request."""
+    vodUrl: str
+    outdir: str = "out"
+    datasetOut: str = "dataset"
+    minSpeechMs: int = 1200
+    maxClipSec: int = 12
+    padMs: int = 150
+    mergeGapMs: int = 300
+    clipAac: bool = True
+    clipAacBitrate: int = 256
+    threads: int = 4
+    force: bool = True
+
+
+class RunTrainResponse(BaseModel):
+    """Voice dataset training response."""
+    datasetPath: str
+    clipsDir: str
+    manifestPath: str
+    segmentsPath: str
+    exitCode: int
+    log: List[str] = []
+
+
 class JobSteps(BaseModel):
     """Job step completion status."""
     vod: bool = False
     audio: bool = False
     sanitize: bool = False
     srt: bool = False
+    train: bool = False
     tts: bool = False
 
 
@@ -175,6 +211,7 @@ class JobOutputs(BaseModel):
     audioPath: Optional[str] = None
     sanitizePath: Optional[str] = None
     srtPath: Optional[str] = None
+    datasetPath: Optional[str] = None
     ttsPath: Optional[str] = None
 
 

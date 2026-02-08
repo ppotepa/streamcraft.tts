@@ -30,10 +30,20 @@ export type SanitizeResult = {
     previewSegments: SegmentPreview[];
     previewPath: string;
     previewSampleRate: number;
+    appliedSettings: {
+        silenceThresholdDb: number;
+        minSegmentMs: number;
+        mergeGapMs: number;
+        targetPeakDb: number;
+        fadeMs: number;
+    };
+    voiceSamples: { start: number; end: number; duration: number; rmsDb: number; path: string }[];
     log: string[];
 };
 export type SrtResult = { exitCode: number; path: string; lines: number; excerpt: string; log: string[] };
 export type TtsResult = { exitCode: number; outputPath: string; log: string[] };
+export type TtsStreamResult = { exitCode: number; outputPath: string; log: string[] };
+export type TrainResult = { exitCode: number; datasetPath: string; clipsDir: string; manifestPath: string; segmentsPath: string; log: string[] };
 
 export type Job = {
     id: string;
@@ -63,6 +73,13 @@ export interface WizardApi {
     runSanitize: (
         opts: {
             vodUrl: string;
+            auto: boolean;
+            voiceSample: boolean;
+            voiceSampleCount: number;
+            voiceSampleMinDuration?: number;
+            voiceSampleMaxDuration?: number;
+            voiceSampleMinRmsDb?: number;
+            manualSamples?: Array<{start: number; end: number}>;
             silenceThresholdDb: number;
             minSegmentMs: number;
             mergeGapMs: number;
@@ -71,7 +88,8 @@ export interface WizardApi {
         }
     ) => Promise<SanitizeResult>;
     runSrt: (opts: { vodUrl: string }) => Promise<SrtResult>;
-    runTts: (opts: { vodUrl: string; text: string; streamer: string }) => Promise<TtsResult>;
+    runTrain: (opts: { vodUrl: string }) => Promise<TrainResult>;
+    runTts: (opts: { vodUrl: string; text: string; streamer: string; onLog?: (line: string) => void }) => Promise<TtsStreamResult>;
     getSegmentReview: (opts: { vodUrl: string }) => Promise<SegmentReviewState>;
     saveSegmentReview: (
         opts: { vodUrl: string; totalSegments: number; reviewIndex: number; votes: SegmentReviewVote[] }
@@ -114,6 +132,13 @@ class HttpApi implements WizardApi {
 
     async runSanitize(opts: {
         vodUrl: string;
+        auto: boolean;
+        voiceSample: boolean;
+        voiceSampleCount: number;
+        voiceSampleMinDuration?: number;
+        voiceSampleMaxDuration?: number;
+        voiceSampleMinRmsDb?: number;
+        manualSamples?: Array<{start: number; end: number}>;
         silenceThresholdDb: number;
         minSegmentMs: number;
         mergeGapMs: number;
@@ -127,8 +152,65 @@ class HttpApi implements WizardApi {
         return this.post<SrtResult>('/srt/run', opts);
     }
 
-    async runTts(opts: { vodUrl: string; text: string; streamer: string }): Promise<TtsResult> {
-        return this.post<TtsResult>('/tts/run', opts);
+    async runTrain(opts: { vodUrl: string }): Promise<TrainResult> {
+        return this.post<TrainResult>('/train/run', opts);
+    }
+
+    async runTts(opts: { vodUrl: string; text: string; streamer: string; onLog?: (line: string) => void }): Promise<TtsStreamResult> {
+        const body = { vodUrl: opts.vodUrl, text: opts.text, streamer: opts.streamer, stream: true };
+        const res = await fetch(`${this.baseUrl}/tts/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const msg = await res.text();
+            throw new Error(msg || `Request failed (${res.status})`);
+        }
+
+        // Stream NDJSON logs
+        const reader = res.body?.getReader();
+        if (!reader) {
+            throw new Error('Streaming not supported');
+        }
+
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        const log: string[] = [];
+        let outputPath = '';
+        let exitCode = 0;
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (!line) continue;
+                try {
+                    const evt = JSON.parse(line);
+                    if (evt.type === 'log' && evt.line) {
+                        log.push(evt.line);
+                        opts.onLog?.(evt.line);
+                    } else if (evt.type === 'done') {
+                        exitCode = evt.exitCode ?? 0;
+                        outputPath = evt.outputPath ?? '';
+                    } else if (evt.type === 'error') {
+                        throw new Error(evt.error || 'TTS failed');
+                    }
+                } catch (err) {
+                    // swallow malformed lines
+                }
+            }
+        }
+
+        if (!outputPath) {
+            throw new Error('TTS finished without outputPath');
+        }
+
+        return { exitCode, outputPath, log };
     }
 
     async getSegmentReview(opts: { vodUrl: string }): Promise<SegmentReviewState> {
@@ -272,6 +354,13 @@ class MockApi implements WizardApi {
 
     async runSanitize(opts: {
         vodUrl: string;
+        auto: boolean;
+        voiceSample: boolean;
+        voiceSampleCount: number;
+        voiceSampleMinDuration?: number;
+        voiceSampleMaxDuration?: number;
+        voiceSampleMinRmsDb?: number;
+        manualSamples?: Array<{start: number; end: number}>;
         silenceThresholdDb: number;
         minSegmentMs: number;
         mergeGapMs: number;
@@ -280,6 +369,15 @@ class MockApi implements WizardApi {
     }): Promise<SanitizeResult> {
         await sleep(this.delayMs);
         const vodId = extractVodId(opts.vodUrl) || '2688036561';
+        const applied = opts.auto
+            ? { silenceThresholdDb: -33, minSegmentMs: 750, mergeGapMs: 260, targetPeakDb: -1, fadeMs: 12 }
+            : {
+                silenceThresholdDb: opts.silenceThresholdDb,
+                minSegmentMs: opts.minSegmentMs,
+                mergeGapMs: opts.mergeGapMs,
+                targetPeakDb: opts.targetPeakDb,
+                fadeMs: opts.fadeMs,
+            };
         return {
             exitCode: 0,
             cleanPath: `out/juggernautjason/audio/${vodId}.clean.wav`,
@@ -292,6 +390,18 @@ class MockApi implements WizardApi {
             ],
             previewPath: `out/juggernautjason/audio/${vodId}.preview.wav`,
             previewSampleRate: 24000,
+            appliedSettings: applied,
+            voiceSamples: (opts.voiceSample || opts.manualSamples)
+                ? (opts.manualSamples || [
+                    { start: 0, end: 5, duration: 5, rmsDb: -20, path: `out/juggernautjason/audio/${vodId}.voice_samples/sample0.wav` },
+                    { start: 6, end: 11, duration: 5, rmsDb: -21, path: `out/juggernautjason/audio/${vodId}.voice_samples/sample1.wav` },
+                ]).slice(0, 5).map((s: any, i: number) => ({
+                    ...s,
+                    duration: s.duration || (s.end - s.start),
+                    rmsDb: s.rmsDb || -20,
+                    path: s.path || `out/juggernautjason/audio/${vodId}.voice_samples/sample${i}.wav`,
+                }))
+                : [],
             log: [
                 '[i] trimming silence',
                 '[i] normalizing loudness',
@@ -314,12 +424,27 @@ class MockApi implements WizardApi {
         };
     }
 
-    async runTts(opts: { vodUrl: string; text: string; streamer: string }): Promise<TtsResult> {
+    async runTrain(opts: { vodUrl: string }): Promise<TrainResult> {
         await sleep(this.delayMs);
+        const vodId = extractVodId(opts.vodUrl) || '2688036561';
+        return {
+            exitCode: 0,
+            datasetPath: `dataset/juggernautjason`,
+            clipsDir: `dataset/juggernautjason/clips`,
+            manifestPath: `dataset/juggernautjason/manifest.csv`,
+            segmentsPath: `dataset/juggernautjason/segments.json`,
+            log: ['[i] slicing clips', '[i] writing manifest', '[done] dataset ready'],
+        };
+    }
+
+    async runTts(opts: { vodUrl: string; text: string; streamer: string; onLog?: (line: string) => void }): Promise<TtsStreamResult> {
+        await sleep(this.delayMs);
+        const log = ['[i] xtts_v2', '[i] vocoder', '[done] file written'];
+        log.forEach((l) => opts.onLog?.(l));
         return {
             exitCode: 0,
             outputPath: `out/${opts.streamer}/tts/tts_${Date.now()}.wav`,
-            log: ['[i] xtts_v2', '[i] vocoder', '[done] file written'],
+            log,
         };
     }
 

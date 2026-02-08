@@ -32,6 +32,10 @@ $env:TEMP = $tempDir
 $env:LOCALAPPDATA = $cacheDir
 $env:HF_HOME = Join-Path $cacheDir 'hf'
 
+# Silence Coqui license prompt (you must already have agreed to CPML/commercial terms)
+$env:COQUI_TOS_AGREEMENT = '1'
+$env:COQUI_LICENSE_CONFIRM = '1'
+
 function Select-DatasetClips {
     param(
         [Parameter(Mandatory = $true)]
@@ -41,7 +45,9 @@ function Select-DatasetClips {
 
     $dataset = Resolve-Path $DatasetPath -ErrorAction Stop
     $clipsDir = Join-Path $dataset 'clips'
-    if (-not (Test-Path $clipsDir)) {
+    $voiceSamplesDir = Join-Path $dataset 'voice_samples'
+
+    if (-not (Test-Path $clipsDir) -and -not (Test-Path $voiceSamplesDir)) {
         throw "Dataset clips folder not found: $clipsDir"
     }
 
@@ -51,6 +57,16 @@ function Select-DatasetClips {
 
     $selected = @()
     $seen = [System.Collections.Generic.HashSet[string]]::new()
+
+    # Prefer curated voice samples when present
+    if (Test-Path $voiceSamplesDir) {
+        $voiceCandidates = Get-ChildItem $voiceSamplesDir -Filter *.wav -File | Sort-Object Length -Descending
+        foreach ($clip in $voiceCandidates) {
+            if ($seen.Contains($clip.FullName)) { continue }
+            $selected += $clip.FullName
+            if ($selected.Count -ge $Count) { return $selected }
+        }
+    }
 
     $manifest = Join-Path $dataset 'manifest.csv'
     if (Test-Path $manifest) {
@@ -84,13 +100,19 @@ function Select-DatasetClips {
         }
     }
 
-    $fallback = @(
-        (Get-ChildItem $clipsDir -Filter *.m4a -File | Sort-Object Length -Descending),
-        (Get-ChildItem $clipsDir -Filter *.wav -File | Sort-Object Length -Descending)
-    ) | Where-Object { $_ }
-    foreach ($clip in $fallback) {
-        if ($seen.Contains($clip.FullName)) { continue }
-        $selected += $clip.FullName
+    $fallbackDirs = @()
+    if (Test-Path $clipsDir) { $fallbackDirs += $clipsDir }
+    if (Test-Path $voiceSamplesDir) { $fallbackDirs += $voiceSamplesDir }
+    foreach ($dir in $fallbackDirs) {
+        $fallback = @(
+            (Get-ChildItem $dir -Filter *.m4a -File | Sort-Object Length -Descending),
+            (Get-ChildItem $dir -Filter *.wav -File | Sort-Object Length -Descending)
+        ) | Where-Object { $_ }
+        foreach ($clip in $fallback) {
+            if ($seen.Contains($clip.FullName)) { continue }
+            $selected += $clip.FullName
+            if ($selected.Count -ge $Count) { break }
+        }
         if ($selected.Count -ge $Count) { break }
     }
 
@@ -125,13 +147,90 @@ foreach ($clip in $speakerClips) {
     }
 }
 
+# Convert non-wav speaker clips to wav so torchaudio/soundfile can load them reliably
+$speakerWavDir = Join-Path $tempDir 'tts_speaker_wav'
+New-Item -ItemType Directory -Force -Path $speakerWavDir | Out-Null
+
+function Get-Ffmpeg {
+    $ffmpegExe = $env:FFMPEG_PATH
+    if (-not $ffmpegExe) {
+        $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+        if ($cmd) { $ffmpegExe = $cmd.Source }
+    }
+    if (-not $ffmpegExe) {
+        throw "ffmpeg not found. Install ffmpeg and ensure it is on PATH or set FFMPEG_PATH to ffmpeg.exe"
+    }
+    return $ffmpegExe
+}
+
+function Convert-ToWav {
+    param([Parameter(Mandatory = $true)][string]$ClipPath)
+
+    $ext = ([IO.Path]::GetExtension($ClipPath) ?? '').ToLowerInvariant()
+    if ($ext -eq '.wav') { return $ClipPath }
+
+    $base = [IO.Path]::GetFileNameWithoutExtension($ClipPath)
+    $target = Join-Path $speakerWavDir "$base.wav"
+
+    if (-not (Test-Path $target)) {
+        Write-Host "[i] Converting reference clip to wav: $ClipPath" -ForegroundColor DarkGray
+        $ffmpegExe = Get-Ffmpeg
+
+        $fileInfo = Get-Item -LiteralPath $ClipPath -ErrorAction Stop
+        if ($fileInfo.Length -le 0) {
+            throw "Clip has zero length: $ClipPath"
+        }
+
+        $args = @('-y', '-i', $ClipPath, '-vn', '-sn', '-ar', '24000', '-ac', '1', '-acodec', 'pcm_s16le', $target)
+        $ffmpegOutput = & $ffmpegExe @args 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $target)) {
+            $msg = "Failed to convert $ClipPath to wav; ffmpeg exit code $LASTEXITCODE. Output: $ffmpegOutput"
+            throw $msg
+        }
+    }
+
+    return $target
+}
+
+$convertedClips = @()
+foreach ($clip in $speakerClips) {
+    try {
+        $converted = Convert-ToWav $clip
+        if ($converted) { $convertedClips += $converted }
+    } catch {
+        Write-Warning "Skipping clip $($clip): $($_)"
+    }
+}
+
+$speakerClips = $convertedClips
+if (-not $speakerClips -or $speakerClips.Count -eq 0) {
+    # Fallback: use the dataset clean WAV (first 6s) if available
+    $fallback = Get-ChildItem -LiteralPath $SpeakerDataset -Filter '*_clean.wav' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $fallback) {
+        $fallback = Get-ChildItem -LiteralPath $SpeakerDataset -Filter '*.wav' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if (-not $fallback) {
+        throw "All speaker clips failed to convert and no fallback clean WAV found in dataset."
+    }
+
+    $ffmpegExe = Get-Ffmpeg
+    $fallbackOut = Join-Path $speakerWavDir 'fallback.wav'
+    Write-Host "[i] Using fallback clip (first 6s): $($fallback.FullName)" -ForegroundColor Yellow
+    $args = @('-y', '-i', $fallback.FullName, '-t', '6', '-vn', '-sn', '-ar', '24000', '-ac', '1', '-acodec', 'pcm_s16le', $fallbackOut)
+    $ffmpegOutput = & $ffmpegExe @args 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $fallbackOut)) {
+        throw "Failed to create fallback clip; ffmpeg exit code $LASTEXITCODE. Output: $ffmpegOutput"
+    }
+    $speakerClips = @($fallbackOut)
+}
+
 $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
 
 # TTS venv
 $venv = Join-Path $root '.venv-tts'
 $python = Join-Path $venv 'Scripts\python.exe'
 $depsMarker = Join-Path $venv '.deps_installed'
-$depsVersion = '2026-02-06b'
+$depsVersion = '2026-02-08a'
 $transformersSpec = 'transformers==4.39.3'
 
 if (Test-Path $depsMarker) {
@@ -142,17 +241,36 @@ if (Test-Path $depsMarker) {
 }
 
 function New-TtsVenv {
-    Write-Host '[i] Creating TTS venv (Python 3.11)...' -ForegroundColor Cyan
+    Write-Host '[i] Creating TTS venv (preferring Python 3.11/3.10)...' -ForegroundColor Cyan
+
+    $candidates = @(
+        @{ Cmd = 'py'; Args = @('-3.11') },
+        @{ Cmd = 'py'; Args = @('-3.10') },
+        @{ Cmd = 'python'; Args = @() }
+    )
+
     $created = $false
-    try {
-        & py -3.11 -m venv $venv
-        $created = $true
-    } catch {
-        Write-Warning "py -3.11 not available or failed; falling back to default python"
+
+    foreach ($candidate in $candidates) {
+        $args = @()
+        if ($candidate.Args) { $args += $candidate.Args }
+        $args += @('-m', 'venv', $venv)
+
+        try {
+            & $candidate.Cmd @args
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $python)) {
+                $created = $true
+                break
+            }
+        } catch {
+            continue
+        }
     }
+
     if (-not $created) {
-        & python -m venv $venv
+        throw "Failed to create TTS virtual environment. Install Python 3.11 or 3.10 and ensure 'py -3.11' or 'py -3.10' works."
     }
+
     Remove-Item -Path $depsMarker -Force -ErrorAction SilentlyContinue
 }
 
@@ -162,12 +280,12 @@ if (-not (Test-Path $python)) {
 
 $pyVersion = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
 if ([version]$pyVersion -ge [version]'3.12') {
-    Write-Host "[i] Current TTS venv uses Python $pyVersion; rebuilding with 3.11..." -ForegroundColor Yellow
+    Write-Host "[i] Current TTS venv uses Python $pyVersion; rebuilding with Python 3.11/3.10..." -ForegroundColor Yellow
     Remove-Item -Path $venv -Recurse -Force -ErrorAction SilentlyContinue
     New-TtsVenv
     $pyVersion = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
     if ([version]$pyVersion -ge [version]'3.12') {
-        throw "TTS requires Python < 3.12 but py -3.11 is unavailable. Install Python 3.11 and ensure 'py -3.11' works."
+        throw "TTS requires Python < 3.12. Install Python 3.11 or 3.10 and ensure 'py -3.11' or 'py -3.10' is available."
     }
 }
 
@@ -213,6 +331,11 @@ $env:TTS_OUTPUT = $OutputFile
 $env:TTS_MODEL = $Model
 $env:TTS_LANG = $Language
 
+# Belt-and-suspenders: force Coqui license prompts to auto-accept non-interactively
+$env:COQUI_TOS_AGREEMENT = '1'
+$env:COQUI_LICENSE_CONFIRM = '1'
+$env:COQUI_CLI_TELEMETRY = '0'
+
 try {
     & $python -c @"
 import json
@@ -222,6 +345,14 @@ import torch
 from torch.serialization import add_safe_globals
 from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import XttsAudioConfig, XttsArgs
+import builtins
+
+# Auto-accept Coqui CPML prompt in non-interactive runs
+def _auto_input(prompt: str = ""):
+    print(prompt, flush=True)
+    return "y"
+
+builtins.input = _auto_input
 
 add_safe_globals([XttsConfig, XttsAudioConfig, XttsArgs])
 

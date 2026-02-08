@@ -14,6 +14,7 @@ export type { TileVote, PlayerTranscript };
 interface SegmentViewerProps {
     segments: ViewerSegment[];
     playingIdx: number;
+    currentIdx: number;
     votes: Record<number, TileVote>;
     transcripts: Record<number, PlayerTranscript>;
     audioSrc?: string;
@@ -22,6 +23,9 @@ interface SegmentViewerProps {
     onSelect: (idx: number) => void;
     onAccept: () => void;
     onReject: () => void;
+    onAudioLoading?: (percent: number) => void;
+    onAudioReady?: () => void;
+    onAudioError?: (message: string) => void;
 }
 
 /**
@@ -32,6 +36,7 @@ export function SegmentViewer({
     segments,
     playingIdx,
     votes,
+    currentIdx,
     transcripts,
     audioSrc,
     playToken,
@@ -39,6 +44,9 @@ export function SegmentViewer({
     onSelect,
     onAccept,
     onReject,
+    onAudioLoading,
+    onAudioReady,
+    onAudioError,
 }: SegmentViewerProps) {
     const vote = current ? votes[current.index] : undefined;
     const transcript = current ? transcripts[current.index] : undefined;
@@ -59,8 +67,8 @@ export function SegmentViewer({
                     Enter = Accept · Spacja = Reject · ↑/↓ = nawigacja · jeden player
                 </span>
             </div>
-            <TileView segments={segments} playingIdx={playingIdx} votes={votes} onSelect={onSelect} />
-            <Timeline segments={segments} playingIdx={playingIdx} votes={votes as Record<number, TimelineVote>} onSelect={onSelect} />
+            <TileView segments={segments} playingIdx={playingIdx} currentIdx={currentIdx} votes={votes} onSelect={onSelect} />
+            <Timeline segments={segments} playingIdx={playingIdx} currentIdx={currentIdx} votes={votes as Record<number, TimelineVote>} onSelect={onSelect} />
             <PlayerPanel
                 current={current}
                 vote={vote as PlayerVote}
@@ -69,6 +77,9 @@ export function SegmentViewer({
                 playToken={playToken}
                 onAccept={onAccept}
                 onReject={onReject}
+                onAudioLoading={onAudioLoading}
+                onAudioReady={onAudioReady}
+                onAudioError={onAudioError}
             />
         </div>
     );

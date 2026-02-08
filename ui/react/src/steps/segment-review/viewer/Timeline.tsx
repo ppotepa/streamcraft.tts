@@ -12,6 +12,7 @@ export type TimelineVote = 'accept' | 'reject';
 interface TimelineProps {
     segments: TimelineSegment[];
     playingIdx: number;
+    currentIdx: number;
     votes: Record<number, TimelineVote>;
     onSelect: (idx: number) => void;
 }
@@ -20,7 +21,7 @@ interface TimelineProps {
  * Timeline bar showing all segments with color-coded vote states.
  * Click segments to jump to them.
  */
-export function Timeline({ segments, playingIdx, votes, onSelect }: TimelineProps) {
+export function Timeline({ segments, playingIdx, currentIdx, votes, onSelect }: TimelineProps) {
     const totalDuration = segments.length ? Math.max(...segments.map((s) => s.end)) : 0;
 
     return (
@@ -36,14 +37,17 @@ export function Timeline({ segments, playingIdx, votes, onSelect }: TimelineProp
                     const startPct = (s.start / (totalDuration || 1)) * 100;
                     const widthPct = (s.duration / (totalDuration || 1)) * 100;
                     const isPlaying = idx === playingIdx;
+                    const isActive = idx === currentIdx;
 
                     return (
                         <button
                             key={`timeline-${s.index}-${idx}`}
                             className={`absolute top-0 h-full border-2 ${color} ${isPlaying
-                                    ? 'ring-2 ring-white ring-offset-1 ring-offset-slate-900 shadow-[0_0_0_2px_rgba(255,255,255,0.35)]'
+                                ? 'ring-2 ring-white ring-offset-1 ring-offset-slate-900 shadow-[0_0_0_2px_rgba(255,255,255,0.35)]'
+                                : isActive
+                                    ? 'ring-2 ring-accent/60'
                                     : ''
-                                } hover:brightness-110`}
+                                } hover:brightness-110 transition`}
                             style={{ left: `${startPct}%`, width: `${Math.max(widthPct, 0.2)}%` }}
                             onClick={() => onSelect(idx)}
                             title={`#${s.index} ${s.start.toFixed(2)}s-${s.end.toFixed(2)}s`}
