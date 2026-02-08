@@ -35,9 +35,31 @@ export type SanitizeResult = {
 export type SrtResult = { exitCode: number; path: string; lines: number; excerpt: string; log: string[] };
 export type TtsResult = { exitCode: number; outputPath: string; log: string[] };
 
+export type Job = {
+    id: string;
+    vodUrl: string;
+    streamer: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    steps: {
+        vod: boolean;
+        audio: boolean;
+        sanitize: boolean;
+        srt: boolean;
+        tts: boolean;
+    };
+    outputs?: {
+        audioPath?: string;
+        sanitizePath?: string;
+        srtPath?: string;
+        ttsPath?: string;
+    };
+};
+
 export interface WizardApi {
     checkVod: (url: string) => Promise<VodMeta>;
-    runAudio: (opts: { vodUrl: string; force: boolean; useDemucs: boolean; skipAac: boolean }) => Promise<AudioResult>;
+    runAudio: (opts: { vodUrl: string; force: boolean; useDemucs: boolean; skipAac: boolean; authToken?: string; vodQuality?: string }) => Promise<AudioResult>;
     runSanitize: (
         opts: {
             vodUrl: string;
@@ -56,6 +78,10 @@ export interface WizardApi {
     ) => Promise<SegmentReviewState>;
     exportClips: (opts: { vodUrl: string }) => Promise<ExportClipsResponse>;
     artifactUrl: (path: string) => string;
+    getJobs: () => Promise<Job[]>;
+    getJob: (id: string) => Promise<Job>;
+    updateJob: (id: string, updates: Partial<Job>) => Promise<Job>;
+    deleteJob: (id: string) => Promise<void>;
 }
 
 const defaultBase = import.meta.env.VITE_API_BASE ?? 'http://localhost:8010/api';
@@ -82,7 +108,7 @@ class HttpApi implements WizardApi {
         return (await res.json()) as VodMeta;
     }
 
-    async runAudio(opts: { vodUrl: string; force: boolean; useDemucs: boolean; skipAac: boolean }): Promise<AudioResult> {
+    async runAudio(opts: { vodUrl: string; force: boolean; useDemucs: boolean; skipAac: boolean; authToken?: string; vodQuality?: string }): Promise<AudioResult> {
         return this.post<AudioResult>('/audio/run', opts);
     }
 
@@ -132,6 +158,47 @@ class HttpApi implements WizardApi {
         return `${this.baseUrl}/artifact?path=${encodeURIComponent(path)}`;
     }
 
+    async getJobs(): Promise<Job[]> {
+        const res = await fetch(`${this.baseUrl}/jobs`);
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || `Request failed (${res.status})`);
+        }
+        return (await res.json()) as Job[];
+    }
+
+    async getJob(id: string): Promise<Job> {
+        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || `Request failed (${res.status})`);
+        }
+        return (await res.json()) as Job;
+    }
+
+    async updateJob(id: string, updates: Partial<Job>): Promise<Job> {
+        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+        });
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || `Request failed (${res.status})`);
+        }
+        return (await res.json()) as Job;
+    }
+
+    async deleteJob(id: string): Promise<void> {
+        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+        });
+        if (!res.ok) {
+            const message = await res.text();
+            throw new Error(message || `Request failed (${res.status})`);
+        }
+    }
+
     private async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
         const res = await fetch(`${this.baseUrl}${path}`, {
             method: 'POST',
@@ -148,6 +215,31 @@ class HttpApi implements WizardApi {
 
 class MockApi implements WizardApi {
     private reviewStore: Record<string, SegmentReviewState> = {};
+    private jobStore: Job[] = [
+        {
+            id: 'job-1',
+            vodUrl: 'https://www.twitch.tv/videos/2688036561',
+            streamer: 'juggernautjason',
+            title: 'Ranked grind night — finished audio',
+            createdAt: new Date(Date.now() - 3600000).toISOString(),
+            updatedAt: new Date(Date.now() - 1800000).toISOString(),
+            steps: { vod: true, audio: true, sanitize: false, srt: false, tts: false },
+            outputs: { audioPath: 'out/juggernautjason/audio/2688036561.wav' },
+        },
+        {
+            id: 'job-2',
+            vodUrl: 'https://www.twitch.tv/videos/2689875280',
+            streamer: 'rotterdam08',
+            title: 'Late night coding — sanitize done',
+            createdAt: new Date(Date.now() - 7200000).toISOString(),
+            updatedAt: new Date(Date.now() - 3600000).toISOString(),
+            steps: { vod: true, audio: true, sanitize: true, srt: false, tts: false },
+            outputs: {
+                audioPath: 'out/rotterdam08/audio/2689875280.wav',
+                sanitizePath: 'out/rotterdam08/audio/2689875280.clean.wav',
+            },
+        },
+    ];
 
     constructor(private readonly delayMs: number) { }
 
@@ -163,7 +255,7 @@ class MockApi implements WizardApi {
         };
     }
 
-    async runAudio(opts: { vodUrl: string }): Promise<AudioResult> {
+    async runAudio(opts: { vodUrl: string; authToken?: string; vodQuality?: string }): Promise<AudioResult> {
         await sleep(this.delayMs);
         const vodId = extractVodId(opts.vodUrl) || '2688036561';
         return {
@@ -285,6 +377,33 @@ class MockApi implements WizardApi {
 
     artifactUrl(): string {
         return '';
+    }
+
+    async getJobs(): Promise<Job[]> {
+        await sleep(this.delayMs);
+        return [...this.jobStore];
+    }
+
+    async getJob(id: string): Promise<Job> {
+        await sleep(this.delayMs);
+        const job = this.jobStore.find((j) => j.id === id);
+        if (!job) throw new Error(`Job not found: ${id}`);
+        return { ...job };
+    }
+
+    async updateJob(id: string, updates: Partial<Job>): Promise<Job> {
+        await sleep(this.delayMs);
+        const idx = this.jobStore.findIndex((j) => j.id === id);
+        if (idx === -1) throw new Error(`Job not found: ${id}`);
+        this.jobStore[idx] = { ...this.jobStore[idx], ...updates, updatedAt: new Date().toISOString() };
+        return { ...this.jobStore[idx] };
+    }
+
+    async deleteJob(id: string): Promise<void> {
+        await sleep(this.delayMs);
+        const idx = this.jobStore.findIndex((j) => j.id === id);
+        if (idx === -1) throw new Error(`Job not found: ${id}`);
+        this.jobStore.splice(idx, 1);
     }
 }
 

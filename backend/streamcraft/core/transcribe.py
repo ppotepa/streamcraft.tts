@@ -175,7 +175,13 @@ def ensure_cuda_dlls_available():
         log(f"Added CUDA DLLs to PATH: {', '.join(added)}")
 
 
-def download_vod(url: str, out_dir: Path, quality: str = "audio_only", force: bool = False) -> Path:
+def download_vod(
+    url: str,
+    out_dir: Path,
+    quality: str = "audio_only",
+    force: bool = False,
+    auth_token: Optional[str] = None,
+) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     m = re.search(r"(\d{6,})", url)
     base = m.group(1) if m else "vod"
@@ -183,23 +189,46 @@ def download_vod(url: str, out_dir: Path, quality: str = "audio_only", force: bo
     if target.exists() and not force:
         log(f"[i] Reusing cached VOD {target}")
         return target
-    cmd = [
-        sys.executable,
-        "-m",
-        "twitchdl",
-        "download",
-        url,
-        "-o",
-        str(target),
-        "--overwrite",
-        "--quality",
-        quality,
-    ]
-    log(f"Downloading VOD via twitchdl ({quality}) to {target}: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
-    if not target.exists():
-        raise RuntimeError(f"twitchdl did not produce expected file: {target}")
-    return target
+
+    # Try a small set of fallback qualities if the preferred one fails (120 errors)
+    preferred = [q for q in [quality, "source", "720p", "1080p"] if q]
+    tried = set()
+    last_err: Optional[str] = None
+
+    for q in preferred:
+        if q in tried:
+            continue
+        tried.add(q)
+        cmd = [
+            sys.executable,
+            "-m",
+            "twitchdl",
+            "download",
+            url,
+            "-o",
+            str(target),
+            "--overwrite",
+            "--quality",
+            q,
+        ]
+        if auth_token:
+            cmd.extend(["--auth-token", auth_token])
+
+        log(f"Downloading VOD via twitchdl ({q}) to {target}: {' '.join(cmd)}")
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0 and target.exists():
+            return target
+
+        err_text = (result.stderr or result.stdout or "").strip()
+        last_err = f"quality={q} code={result.returncode} {err_text}"
+        log_warn(f"twitchdl failed ({last_err}); retrying with fallback quality...")
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    raise RuntimeError(f"twitchdl failed for all qualities. Last error: {last_err or 'unknown'}")
 
 
 def extract_audio(input_media: Path, out_dir: Path, force: bool = False) -> Tuple[Path, Path]:

@@ -30,6 +30,8 @@ class RunAudioRequest(BaseModel):
     force: bool = False
     useDemucs: bool = False
     skipAac: bool = False
+    authToken: Optional[str] = None
+    vodQuality: Optional[str] = None  # e.g., audio_only, source, 720p
 
 
 class RunAudioResponse(BaseModel):
@@ -157,3 +159,38 @@ class RunTtsResponse(BaseModel):
     datasetOut: str = "dataset"
     exitCode: int
     log: List[str] = []
+
+
+class JobSteps(BaseModel):
+    """Job step completion status."""
+    vod: bool = False
+    audio: bool = False
+    sanitize: bool = False
+    srt: bool = False
+    tts: bool = False
+
+
+class JobOutputs(BaseModel):
+    """Job output paths."""
+    audioPath: Optional[str] = None
+    sanitizePath: Optional[str] = None
+    srtPath: Optional[str] = None
+    ttsPath: Optional[str] = None
+
+
+class JobResponse(BaseModel):
+    """Job model."""
+    id: str
+    vodUrl: str
+    streamer: str
+    title: str
+    createdAt: str
+    updatedAt: str
+    steps: JobSteps
+    outputs: Optional[JobOutputs] = None
+
+
+class UpdateJobRequest(BaseModel):
+    """Update job request."""
+    steps: Optional[JobSteps] = None
+    outputs: Optional[JobOutputs] = None

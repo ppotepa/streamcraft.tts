@@ -2,6 +2,9 @@
 
 import datetime
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import soundfile as sf
@@ -25,7 +28,10 @@ from streamcraft.models.api import (
     ExportClipsRequest,
     ExportClipsResponse,
     ExportClipItem,
+    JobResponse,
+    UpdateJobRequest,
 )
+from streamcraft.settings import get_settings
 
 router = APIRouter()
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
@@ -91,7 +97,7 @@ async def run_audio(request: RunAudioRequest) -> RunAudioResponse:
     """Extract audio from VOD."""
     try:
         from streamcraft.core.pipeline import resolve_output_dirs, configure_temp_dir
-        from streamcraft.core.transcribe import download_vod, extract_audio
+        from streamcraft.core.transcribe import extract_audio
 
         configure_temp_dir(Path.cwd())
 
@@ -109,8 +115,64 @@ async def run_audio(request: RunAudioRequest) -> RunAudioResponse:
             entry = f"[{timestamp}] {msg}"
             log_buffer.append(entry)
 
+        def download_with_fallback(url: str, out_dir: Path, quality: str, auth_token: str | None) -> Path:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            # derive basename
+            import re
+
+            m = re.search(r"(\d{6,})", url)
+            base = m.group(1) if m else "vod"
+            target = out_dir / f"{base}.mp4"
+
+            # If already exists and not forcing re-download
+            if target.exists() and not request.force:
+                return target
+
+            qualities = []
+            seen = set()
+            for q in [quality, "audio_only", "source", "720p", "1080p"]:
+                if q and q not in seen:
+                    qualities.append(q)
+                    seen.add(q)
+
+            last_err = None
+            for q in qualities:
+                if target.exists():
+                    try:
+                        target.unlink()
+                    except Exception:
+                        pass
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "twitchdl",
+                    "download",
+                    url,
+                    "-o",
+                    str(target),
+                    "--overwrite",
+                    "--quality",
+                    q,
+                ]
+                if auth_token:
+                    cmd.extend(["--auth-token", auth_token])
+
+                log(f"twitchdl try quality={q}: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0 and target.exists():
+                    return target
+
+                err_text = (result.stderr or result.stdout or "").strip()
+                last_err = f"quality={q} code={result.returncode} {err_text}"
+                log(f"twitchdl failed: {last_err}")
+
+            raise RuntimeError(f"twitchdl failed for all qualities. Last error: {last_err or 'unknown'}")
+
         log("Ensuring VOD media is ready...")
-        download_target = download_vod(vod_url, vod_dir)
+        settings = get_settings()
+        auth_token = request.authToken or os.environ.get("TWITCHDL_AUTH_TOKEN")
+        quality = request.vodQuality or settings.vod_quality
+        download_target = download_with_fallback(vod_url, vod_dir, quality=quality, auth_token=auth_token)
         log(f"VOD ready at {download_target}")
 
         log("Extracting PCM audio via ffmpeg...")
@@ -371,26 +433,206 @@ async def export_sanitize_clips(request: ExportClipsRequest) -> ExportClipsRespo
 
 @router.post("/srt/run")
 async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
-    """Transcribe audio to SRT."""
-    # TODO: Implement actual transcription as background job
-    return RunSrtResponse(
-        path="out/demo/vods/123456/123456.srt",
-        lines=100,
-        excerpt="1\n00:00:00,000 --> 00:00:05,000\nHello world\n\n2\n00:00:05,000 --> 00:00:10,000\nThis is a test",
-        exitCode=0,
-        log=["[i] Transcribing...", "[OK] Transcribed 100 segments"],
-    )
+    """Transcribe audio to SRT using faster-whisper."""
+    try:
+        from streamcraft.core.pipeline import resolve_output_dirs, configure_temp_dir
+        from streamcraft.core.transcribe import run_transcription
+
+        configure_temp_dir(Path.cwd())
+
+        vod_url = request.vodUrl
+        out_root = Path("out")
+        dataset_root = Path("dataset")
+
+        _, vod_dir, _ = resolve_output_dirs(vod_url, out_root, dataset_root)
+        vod_dir.mkdir(parents=True, exist_ok=True)
+
+        log_buffer = []
+
+        def capture_log(msg: str):
+            timestamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+            entry = f"[{timestamp}] {msg}"
+            log_buffer.append(entry)
+            print(entry)
+
+        # Mock the log functions to capture output
+        import streamcraft.core.transcribe as transcribe_module
+        original_log = transcribe_module.log
+        original_log_ok = transcribe_module.log_ok
+        transcribe_module.log = capture_log
+        transcribe_module.log_ok = capture_log
+
+        try:
+            result = run_transcription(
+                vod=vod_url,
+                out_dir=vod_dir,
+                model="large-v3",
+                language="auto",
+                threads=8,
+                device="cuda",
+                compute_type="float16",
+                progress_interval=10.0,
+                vod_quality="audio_only",
+                mux_subs=False,
+                also_vtt=False,
+                also_txt=True,
+                force=False,
+                max_duration=None,
+            )
+        finally:
+            transcribe_module.log = original_log
+            transcribe_module.log_ok = original_log_ok
+
+        srt_path = Path(result["srt"])
+        if not srt_path.exists():
+            raise HTTPException(status_code=500, detail="SRT file not created")
+
+        srt_content = srt_path.read_text(encoding="utf-8")
+        lines = len([line for line in srt_content.split("\n") if "-->" in line])
+        excerpt = "\n".join(srt_content.split("\n")[:20])
+
+        return RunSrtResponse(
+            path=to_workspace_relative(srt_path),
+            lines=lines,
+            excerpt=excerpt,
+            exitCode=0,
+            log=log_buffer,
+        )
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
 
 
 @router.post("/tts/run")
 async def run_tts(request: RunTtsRequest) -> RunTtsResponse:
-    """Generate TTS output."""
-    # TODO: Implement actual TTS generation as background job
-    return RunTtsResponse(
-        outputPath="output/demo/tts/output.wav",
-        exitCode=0,
-        log=["[i] Generating...", "[OK] Generated"],
-    )
+    """Generate TTS output using XTTS v2."""
+    try:
+        from streamcraft.core.pipeline import resolve_output_dirs
+        import subprocess
+        import sys
+
+        out_root = Path(request.outdir or "out")
+        dataset_root = Path(request.datasetOut or "dataset")
+        _, vod_dir, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
+
+        # Find dataset clips for the streamer
+        streamer_dataset = dataset_dir / request.streamer
+        if not streamer_dataset.exists():
+            raise HTTPException(status_code=404, detail=f"Dataset not found for streamer: {request.streamer}")
+
+        clips_dir = streamer_dataset / "clips"
+        if not clips_dir.exists():
+            raise HTTPException(status_code=404, detail="No clips directory found in dataset")
+
+        # Output path
+        output_dir = Path("output")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        output_path = output_dir / f"tts_{request.streamer}_{timestamp}.wav"
+
+        log_buffer = []
+
+        def add_log(msg: str):
+            timestamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+            entry = f"[{timestamp}] {msg}"
+            log_buffer.append(entry)
+
+        add_log("Starting TTS generation...")
+        add_log(f"Streamer dataset: {streamer_dataset}")
+        add_log(f"Text: {request.text}")
+
+        # Call the PowerShell TTS script
+        ps_script = WORKSPACE_ROOT / "scripts" / "tts-generate.ps1"
+        if not ps_script.exists():
+            raise HTTPException(status_code=500, detail="TTS generation script not found")
+
+        cmd = [
+            "pwsh",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(ps_script),
+            "-Text", request.text,
+            "-SpeakerDataset", str(streamer_dataset),
+            "-SpeakerClipCount", "3",
+            "-OutputFile", str(output_path),
+            "-Model", "xtts_v2",
+            "-Language", "en"
+        ]
+
+        add_log(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300  # 5 minute timeout
+        )
+
+        # Capture PowerShell output
+        if result.stdout:
+            for line in result.stdout.split('\n'):
+                if line.strip():
+                    add_log(line.strip())
+
+        if result.returncode != 0:
+            error_msg = result.stderr or "TTS generation failed"
+            add_log(f"ERROR: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        if not output_path.exists():
+            raise HTTPException(status_code=500, detail="TTS output file not created")
+
+        add_log(f"TTS generated successfully: {output_path}")
+
+        return RunTtsResponse(
+            outputPath=to_workspace_relative(output_path),
+            exitCode=result.returncode,
+            log=log_buffer,
+        )
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="TTS generation timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TTS generation failed: {exc}")
+
+
+# Job Management Routes
+
+@router.get("/jobs")
+async def get_jobs() -> list[JobResponse]:
+    """Get all jobs."""
+    from streamcraft.jobs.storage import get_all_jobs
+    return get_all_jobs()
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> JobResponse:
+    """Get a single job by ID."""
+    from streamcraft.jobs.storage import get_job as get_job_by_id
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.put("/jobs/{job_id}")
+async def update_job(job_id: str, request: UpdateJobRequest) -> JobResponse:
+    """Update a job."""
+    from streamcraft.jobs.storage import update_job as update_job_storage
+    job = update_job_storage(job_id, steps=request.steps, outputs=request.outputs)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str) -> dict:
+    """Delete a job."""
+    from streamcraft.jobs.storage import delete_job as delete_job_storage
+    success = delete_job_storage(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": "deleted"}
 
 
 def resolve_artifact_path(path_value: str) -> Path:

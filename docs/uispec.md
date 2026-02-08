@@ -9,6 +9,20 @@
 
 ---
 
+## Repo mapping (current project)
+- The React entrypoint is [ui/react/src/main.tsx](../ui/react/src/main.tsx); there is currently no `App.tsx` or component source in the repo (only a compiled bundle under `ui/react/dist`).
+- Recreate the UI under `ui/react/src`:
+  - `ui/react/src/app/App.tsx` — main wizard shell
+  - `ui/react/src/components/*` — shared UI pieces (StatusCard, PathRow, PresetBar, DiffBanner, AudioPreviewCard, WaveformBars, Toast, EmptyState, etc.)
+  - `ui/react/src/hooks/*` — view-model hooks for API + state
+  - `ui/react/src/state/*` — step state machines and models
+  - Keep existing styling entry [ui/react/src/styles.css](../ui/react/src/styles.css) (Pico + Tailwind v4 import, Space Grotesk/JetBrains Mono fonts).
+- Generated assets live in `ui/react/dist` and should be ignored for source edits.
+- Build/run commands: `cd ui/react && npm install && npm run dev|build`.
+- The spec below stays authoritative for UX; use this mapping to align new source files with the current repo layout.
+
+---
+
 ## 0) Scope & Non-goals
 
 ### In scope
