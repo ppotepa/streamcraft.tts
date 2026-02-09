@@ -17,12 +17,13 @@ htmlcov/
 .venv/
 .venv-*/
 
-# Node / Vite (UI)
-ui/react/node_modules/
-ui/react/dist/
-ui/react/.vite/
-ui/react/.turbo/
-ui/react/.eslintcache
+# Node / Vite (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.turbo/
+frontend/.eslintcache
+ui/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
@@ -48,5 +49,11 @@ Thumbs.db
 # Build / misc
 *.log
 *.tmp
+*.old
+*.old.*
+*.bak
+
+# Cleanup reminder
+# To remove ui/ fully: Close editors, then Remove-Item ui -Recurse -Force
 *.swp
 *.swo

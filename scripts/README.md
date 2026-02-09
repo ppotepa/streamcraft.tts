@@ -1,23 +1,18 @@
-# Legacy Scripts
+# Scripts Directory (Cleaned Up)
 
-These PowerShell scripts are legacy helpers that may reference old paths or be replaced by the Python CLI (`streamcraft`) in future versions.
+All legacy PowerShell scripts have been removed as part of the Clean Architecture migration.
 
-## Scripts
+## Current Usage
 
-- `run_pipeline.ps1` - Legacy pipeline wrapper (use `streamcraft pipeline` instead)
-- `run_tts.ps1` - TTS menu (still active)
-- `tts-generate.ps1` - Quick voice clone (still active)
-- `train-tts.ps1` - Train custom TTS model
-- `finetune-xtts.ps1` - Fine-tune XTTS
-- `win-cuda.ps1` - CUDA-specific pipeline helper
-- `win-cpu.ps1` - CPU-only pipeline helper (deprecated)
-- `transcript.ps1` - Standalone transcription helper
-- `tts.ps1` - TTS helper
+All functionality is now available via:
+- **Backend API**: FastAPI server at `backend/streamcraft/infrastructure/web/fastapi/`
+- **Frontend**: React application at `frontend/`
+- **Build**: Use `build.ps1` at project root
 
-## Migration Note
+## Migration Complete
 
-Most functionality is now available via:
-- `streamcraft pipeline` (CLI from backend package)
-- FastAPI routes in `backend/streamcraft/api/`
-
-These scripts remain for compatibility and special workflows.
+The project now uses Clean Architecture with:
+- Python backend with 22 fully wired handlers
+- TypeScript/React frontend with 7 complete pages
+- Modern dependency injection and type safety
+- See [../PROGRESS.md](../PROGRESS.md) and [../README.md](../README.md) for details
