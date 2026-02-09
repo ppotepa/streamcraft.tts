@@ -52,8 +52,5 @@ Thumbs.db
 *.old
 *.old.*
 *.bak
-
-# Cleanup reminder
-# To remove ui/ fully: Close editors, then Remove-Item ui -Recurse -Force
 *.swp
 *.swo

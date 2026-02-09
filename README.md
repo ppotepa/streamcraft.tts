@@ -21,16 +21,24 @@ The project has been successfully migrated to Clean Architecture with ultra-stri
 ```bash
 cd backend
 pip install -e .
+pip install faster-whisper
 ```
 
 **Frontend:**
 ```bash
-cd frontend
+cd ui/react
 npm install
-npm install react-router-dom @types/react-router-dom
 ```
 
 ### 2. Start Development Servers
+
+**Quick Start (Recommended)**:
+```bash
+.\run_dev.ps1
+```
+Runs both servers with auto-reload. Backend at http://localhost:8000, Frontend at http://localhost:5173
+
+**Or start individually:**
 
 **Backend (Terminal 1):**
 ```bash
@@ -40,8 +48,15 @@ uvicorn streamcraft.infrastructure.web.fastapi.app:app --reload --port 8000
 
 **Frontend (Terminal 2):**
 ```bash
-cd frontend
+cd ui/react
 npm run dev
+```
+
+**Watch Mode (Enhanced)**:
+```bash
+.\watch.ps1              # Both with file watching & auto-reload
+.\watch.ps1 -BackendOnly  # Backend only
+.\watch.ps1 -FrontendOnly # Frontend only
 ```
 
 ### 3. Access Application

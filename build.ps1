@@ -27,14 +27,14 @@ if (-not $SkipBackend) {
 if (-not $SkipUi) {
     $uiPath = Join-Path $root "ui\react"
     if (Test-Path $uiPath) {
-        Write-Host "`n[UI] Installing Node dependencies..." -ForegroundColor Yellow
+        Write-Host "`n[Frontend] Installing Node dependencies..." -ForegroundColor Yellow
         Push-Location $uiPath
         
         if (-not (Test-Path "node_modules")) {
             npm install
         }
         
-        Write-Host "[UI] Building production bundle..." -ForegroundColor Cyan
+        Write-Host "[Frontend] Building production bundle..." -ForegroundColor Cyan
         npm run build
         
         Pop-Location
