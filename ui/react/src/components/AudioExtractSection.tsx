@@ -11,7 +11,6 @@ interface AudioExtractSectionProps {
     onExtract: () => void;
     onRerun: () => void;
     onShowToast: (message: string) => void;
-    onViewLogs: () => void;
 }
 
 /**
@@ -25,7 +24,6 @@ export default function AudioExtractSection({
     onExtract,
     onRerun,
     onShowToast,
-    onViewLogs,
 }: AudioExtractSectionProps): JSX.Element {
     const isRunning = audioStep.status === 'running';
     const isDone = audioStep.status === 'done';
@@ -36,15 +34,17 @@ export default function AudioExtractSection({
             <div className="flex items-center justify-between">
                 <div>
                     <p className="text-base font-semibold text-slate-100">Extract Audio</p>
-                    <p className="text-xs text-slate-400">Choose quality and extract audio track from VOD</p>
+                    <p className="text-xs text-slate-400">
+                        {isRunning ? 'Extracting audio from VOD...' : isDone ? 'Audio ready for processing' : 'Choose quality and extract audio track from VOD'}
+                    </p>
                 </div>
-                {!isDone && (
+                {!isDone && !isRunning && (
                     <button
                         className="px-4 py-2 rounded-lg bg-accent text-slate-950 font-semibold disabled:opacity-60 disabled:cursor-not-allowed hover:bg-accent/90 transition"
                         onClick={onExtract}
                         disabled={isRunning}
                     >
-                        {isRunning ? 'Extracting...' : 'Extract Audio'}
+                        Re-extract
                     </button>
                 )}
             </div>
@@ -71,14 +71,16 @@ export default function AudioExtractSection({
                         <option value="160p">160p</option>
                     </select>
                     <p className="text-xs text-slate-400">
-                        Audio Only is fastest. Higher qualities extract audio from video stream.
+                        {isRunning
+                            ? 'Extraction in progress...'
+                            : 'Audio Only is fastest. Higher qualities extract audio from video stream.'}
                     </p>
                 </div>
             )}
 
             {/* Status Card */}
             {(isRunning || isDone || hasError) && (
-                <StatusCard step={audioStep} onViewLogs={onViewLogs} />
+                <StatusCard step={audioStep} />
             )}
 
             {/* Error Banner */}

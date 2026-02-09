@@ -283,13 +283,18 @@ export default function App(): JSX.Element {
                 )
             );
             appendLog(`[vod] checked: ${meta.title || 'ok'}`);
-            // Don't auto-navigate, stay on VOD to show audio section
+            setVodLoading(false);
+
+            // Auto-extract audio after validation if not already done
+            if (audioStatus === 'idle') {
+                appendLog('[vod] auto-extracting audio...');
+                await runAudio();
+            }
         } catch (err) {
             const message = err instanceof Error ? err.message : 'VOD check failed';
             setVodError(message);
             markError('vod', message);
             setPlatformDetecting(false);
-        } finally {
             setVodLoading(false);
         }
     };
@@ -612,6 +617,7 @@ export default function App(): JSX.Element {
             status: audioStatus === 'extracting' ? 'running' : audioStatus === 'done' ? 'done' : 'idle',
             ready: audioStatus === 'done',
             locked: false,
+            message: audioStatus === 'extracting' ? 'Downloading and extracting audio from VOD...' : undefined,
             outputs: rawAudioPath ? [{ label: 'Audio path', path: rawAudioPath }] : [],
         };
 
@@ -749,7 +755,6 @@ export default function App(): JSX.Element {
                                 onExtract={runAudio}
                                 onRerun={runAudio}
                                 onShowToast={showToast}
-                                onViewLogs={() => setConsoleCollapsed(false)}
                             />
                         )}
                     </>
@@ -888,28 +893,28 @@ export default function App(): JSX.Element {
 
                 {/* Section 3: Vocal Isolation - shows after mode selection */}
                 {activeStep.status !== 'running' && sanitizeMode && (
-                    <div className={shellClasses + ' p-4 space-y-3 animate-fadeIn'} style={{ animationDelay: '0.2s' }}>
+                    <div className="rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-950/40 to-slate-950/70 p-4 space-y-3 animate-fadeIn shadow-lg shadow-violet-500/10" style={{ animationDelay: '0.2s' }}>
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
-                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent/20 text-accent text-xs font-bold">3</span>
-                                <p className="text-sm font-semibold text-slate-200">Vocal Isolation (UVR)</p>
-                                <span className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 text-[10px] font-medium">OPTIONAL</span>
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-500/20 text-violet-300 text-xs font-bold">3</span>
+                                <p className="text-sm font-semibold text-violet-100">Vocal Isolation (UVR)</p>
+                                <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] font-medium">OPTIONAL</span>
                             </div>
-                            <p className="text-xs text-slate-400">Pre-processing step</p>
+                            <p className="text-xs text-violet-400/70">Pre-processing step</p>
                         </div>
-                        
+
                         {/* Enable toggle */}
-                        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                        <div className="rounded-lg border border-violet-500/20 bg-violet-900/10 p-3 hover:border-violet-500/30 transition-colors">
                             <label className="flex items-start gap-3 cursor-pointer">
                                 <input
                                     type="checkbox"
                                     checked={sanitizeExtractVocals}
                                     onChange={(e) => setSanitizeExtractVocals(e.target.checked)}
-                                    className="mt-0.5 w-4 h-4"
+                                    className="mt-0.5 w-4 h-4 accent-violet-500"
                                 />
                                 <div className="flex-1">
-                                    <p className="text-sm font-semibold text-slate-100 mb-1">Enable vocal separation</p>
-                                    <p className="text-xs text-slate-400 leading-relaxed">
+                                    <p className="text-sm font-semibold text-violet-100 mb-1">Enable vocal separation</p>
+                                    <p className="text-xs text-violet-300/70 leading-relaxed">
                                         Uses deep learning models to extract vocal tracks from mixed audio sources. Removes background music, game audio, and environmental noise before speech detection.
                                     </p>
                                 </div>
@@ -918,24 +923,24 @@ export default function App(): JSX.Element {
 
                         {/* Configuration panel - shows when enabled */}
                         {sanitizeExtractVocals && (
-                            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-4 space-y-4 animate-fadeIn">
-                                <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
-                                    <span className="text-xs font-semibold text-slate-300">UVR CONFIGURATION</span>
+                            <div className="rounded-lg border border-violet-500/20 bg-violet-900/10 p-4 space-y-4 animate-fadeIn">
+                                <div className="flex items-center gap-2 pb-2 border-b border-violet-500/20">
+                                    <span className="text-xs font-semibold text-violet-200">UVR CONFIGURATION</span>
                                 </div>
 
                                 {/* Model Selection */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-medium text-slate-300">Separation Model</label>
+                                    <label className="text-xs font-medium text-violet-200">Separation Model</label>
                                     <select
                                         value={sanitizeUvrModel}
                                         onChange={(e) => setSanitizeUvrModel(e.target.value as any)}
-                                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-200 text-sm hover:border-accent focus:border-accent focus:outline-none transition-colors"
+                                        className="w-full px-3 py-2 rounded-lg bg-violet-950/60 border border-violet-500/30 text-violet-100 text-sm hover:border-violet-400 focus:border-violet-400 focus:outline-none transition-colors"
                                     >
                                         <option value="bs-roformer">BS-Roformer (Best quality, ~3-5 min)</option>
                                         <option value="mdx-net">MDX-Net (Balanced, ~2-3 min)</option>
                                         <option value="demucs">Demucs v4 (Fastest, ~1-2 min)</option>
                                     </select>
-                                    <p className="text-[11px] text-slate-500">
+                                    <p className="text-[11px] text-violet-300/60">
                                         {sanitizeUvrModel === 'bs-roformer' && 'State-of-the-art transformer model. Highest vocal quality, slowest processing.'}
                                         {sanitizeUvrModel === 'mdx-net' && 'Hybrid CNN model. Good balance between quality and speed.'}
                                         {sanitizeUvrModel === 'demucs' && 'Waveform-based U-Net. Fastest but may leave artifacts.'}
@@ -944,17 +949,17 @@ export default function App(): JSX.Element {
 
                                 {/* Precision Selection */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-medium text-slate-300">Inference Precision</label>
+                                    <label className="text-xs font-medium text-violet-200">Inference Precision</label>
                                     <select
                                         value={sanitizeUvrPrecision}
                                         onChange={(e) => setSanitizeUvrPrecision(e.target.value as any)}
-                                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-200 text-sm hover:border-accent focus:border-accent focus:outline-none transition-colors"
+                                        className="w-full px-3 py-2 rounded-lg bg-violet-950/60 border border-violet-500/30 text-violet-100 text-sm hover:border-violet-400 focus:border-violet-400 focus:outline-none transition-colors"
                                     >
                                         <option value="fp32">FP32 (Full precision, best quality)</option>
                                         <option value="fp16">FP16 (Half precision, 2x faster, recommended)</option>
                                         <option value="int8">INT8 (Quantized, 4x faster, lower quality)</option>
                                     </select>
-                                    <p className="text-[11px] text-slate-500">
+                                    <p className="text-[11px] text-violet-300/60">
                                         {sanitizeUvrPrecision === 'fp32' && 'Uses 32-bit floating point. Highest accuracy, requires more VRAM.'}
                                         {sanitizeUvrPrecision === 'fp16' && 'Uses 16-bit floating point. Nearly identical quality, 50% faster. Requires GPU support.'}
                                         {sanitizeUvrPrecision === 'int8' && '8-bit integer quantization. Significant speedup, may introduce artifacts.'}
@@ -962,10 +967,10 @@ export default function App(): JSX.Element {
                                 </div>
 
                                 {/* Technical specs */}
-                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
-                                    <div className="rounded bg-slate-950/60 px-2 py-1.5">
-                                        <p className="text-[10px] text-slate-500">Est. time (2h VOD)</p>
-                                        <p className="text-xs text-slate-200 font-mono">
+                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-violet-500/20">
+                                    <div className="rounded bg-violet-950/40 px-2 py-1.5">
+                                        <p className="text-[10px] text-violet-400/70">Est. time (2h VOD)</p>
+                                        <p className="text-xs text-violet-100 font-mono">
                                             {sanitizeUvrModel === 'bs-roformer' && sanitizeUvrPrecision === 'fp32' && '~5 min'}
                                             {sanitizeUvrModel === 'bs-roformer' && sanitizeUvrPrecision === 'fp16' && '~3 min'}
                                             {sanitizeUvrModel === 'bs-roformer' && sanitizeUvrPrecision === 'int8' && '~2 min'}
@@ -977,9 +982,9 @@ export default function App(): JSX.Element {
                                             {sanitizeUvrModel === 'demucs' && sanitizeUvrPrecision === 'int8' && '~30 sec'}
                                         </p>
                                     </div>
-                                    <div className="rounded bg-slate-950/60 px-2 py-1.5">
-                                        <p className="text-[10px] text-slate-500">VRAM usage</p>
-                                        <p className="text-xs text-slate-200 font-mono">
+                                    <div className="rounded bg-violet-950/40 px-2 py-1.5">
+                                        <p className="text-[10px] text-violet-400/70">VRAM usage</p>
+                                        <p className="text-xs text-violet-100 font-mono">
                                             {sanitizeUvrPrecision === 'fp32' && '~4-6 GB'}
                                             {sanitizeUvrPrecision === 'fp16' && '~2-3 GB'}
                                             {sanitizeUvrPrecision === 'int8' && '~1-2 GB'}
@@ -993,7 +998,7 @@ export default function App(): JSX.Element {
 
                 {/* Status & Progress Section */}
                 <div className={shellClasses + ' p-4 space-y-3'}>
-                    <StatusCard step={activeStep} onViewLogs={() => setConsoleCollapsed(false)} />
+                    <StatusCard step={activeStep} />
                     {activeStep.status === 'error' && (
                         <DiffBanner message={activeStep.message || 'Sanitize failed. Adjust settings and re-run.'} onRerun={runSanitize} />
                     )}
@@ -1635,7 +1640,7 @@ export default function App(): JSX.Element {
                         {activeStep.status === 'running' ? 'Running...' : 'Run SRT'}
                     </button>
                 </div>
-                <StatusCard step={activeStep} onViewLogs={() => setConsoleCollapsed(false)} />
+                <StatusCard step={activeStep} />
                 <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-300 space-y-1">
                     <div className="flex flex-wrap gap-2">
                         <span className="px-2 py-1 rounded bg-slate-800 text-slate-200">Input: zaakceptowane segmenty + audio</span>
@@ -1701,7 +1706,7 @@ export default function App(): JSX.Element {
                     </div>
                 </div>
 
-                <StatusCard step={activeStep} onViewLogs={() => setConsoleCollapsed(false)} />
+                <StatusCard step={activeStep} />
 
                 {activeStep.outputs ? (
                     <div className="space-y-2">
@@ -1764,7 +1769,7 @@ export default function App(): JSX.Element {
                     </div>
                 </div>
 
-                <StatusCard step={activeStep} onViewLogs={() => setConsoleCollapsed(false)} />
+                <StatusCard step={activeStep} />
 
                 {activeStep.outputs ? (
                     <div className="space-y-3">

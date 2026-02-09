@@ -216,28 +216,37 @@ class HttpApi implements WizardApi {
                     const line = buffer.slice(0, idx).trim();
                     buffer = buffer.slice(idx + 1);
                     if (!line) continue;
+
+                    let evt: any = null;
                     try {
-                        const evt = JSON.parse(line);
-                        if (evt.type === 'log' && evt.line) {
-                            log.push(evt.line);
-                            opts.onLog?.(evt.line);
-                        } else if (evt.type === 'progress') {
-                            opts.onProgress?.({ type: 'progress', stage: evt.stage, value: evt.value, message: evt.message });
-                        } else if (evt.type === 'stage') {
-                            opts.onProgress?.({ type: 'stage', stage: evt.stage, message: evt.message });
-                        } else if (evt.type === 'done' && evt.result) {
-                            final = evt.result as SanitizeResult;
-                        } else if (evt.type === 'error') {
-                            throw new Error(evt.error || 'Sanitize failed');
-                        }
+                        evt = JSON.parse(line);
                     } catch (err) {
-                        // swallow malformed lines
+                        // swallow malformed JSON lines
+                        continue;
+                    }
+
+                    // Process event (errors should propagate)
+                    if (evt.type === 'log' && evt.line) {
+                        log.push(evt.line);
+                        opts.onLog?.(evt.line);
+                    } else if (evt.type === 'progress') {
+                        opts.onProgress?.({ type: 'progress', stage: evt.stage, value: evt.value, message: evt.message });
+                    } else if (evt.type === 'stage') {
+                        opts.onProgress?.({ type: 'stage', stage: evt.stage, message: evt.message });
+                    } else if (evt.type === 'done' && evt.result) {
+                        final = evt.result as SanitizeResult;
+                    } else if (evt.type === 'error') {
+                        throw new Error(evt.error || 'Sanitize failed');
                     }
                 }
             }
 
             if (!final) {
-                throw new Error('Sanitize finished without result');
+                const lastLogs = log.slice(-5).join('\n');
+                const errorMsg = lastLogs
+                    ? `Sanitize finished without result. Recent logs:\n${lastLogs}`
+                    : 'Sanitize finished without result';
+                throw new Error(errorMsg);
             }
 
             if (!final.log || final.log.length === 0) {

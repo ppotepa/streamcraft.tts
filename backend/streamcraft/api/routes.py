@@ -332,12 +332,32 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                         cfg,
                         event_cb=event_cb,
                     )
-                    payload = serialize_result(result)
-                    q.put({"type": "done", "result": payload.dict()})
+                    try:
+                        payload = serialize_result(result)
+                        result_dict = payload.dict()
+                        q.put({"type": "done", "result": result_dict})
+                    except Exception as ser_exc:
+                        import traceback
+                        error_msg = f"Failed to serialize result: {ser_exc}"
+                        q.put({"type": "error", "error": error_msg, "status": 500})
+                        q.put({"type": "log", "line": f"[SERIALIZATION ERROR] {traceback.format_exc()}"})
                 except FileNotFoundError as exc:
+                    import traceback
                     q.put({"type": "error", "error": str(exc), "status": 404})
+                    q.put({"type": "log", "line": f"[ERROR] {traceback.format_exc()}"})
                 except Exception as exc:
-                    q.put({"type": "error", "error": f"Sanitize failed: {exc}", "status": 500})
+                    import traceback
+                    error_msg = f"Sanitize failed: {exc}"
+                    try:
+                        q.put({"type": "error", "error": error_msg, "status": 500})
+                        q.put({"type": "log", "line": f"[ERROR] {error_msg}"})
+                        q.put({"type": "log", "line": f"[TRACEBACK] {traceback.format_exc()}"})
+                    except:
+                        # Last resort - at least try to put the error
+                        try:
+                            q.put({"type": "error", "error": "Sanitize failed with unrecoverable error", "status": 500})
+                        except:
+                            pass  # Nothing more we can do
 
             threading.Thread(target=worker, daemon=True).start()
 
