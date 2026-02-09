@@ -16,6 +16,7 @@ export interface SegmentReviewProps {
     segments: Segment[];
     vodUrl: string;
     audioSrc?: string;
+    audioPath?: string;
     onClose: () => void;
     onSave: (accepted: number[], rejected: number[]) => void;
 }
@@ -27,7 +28,7 @@ type ReviewSegment = Segment & { index: number; duration: number };
  * Main step component for segment review workflow.
  * Tinder-style single-player flow: normalize segments, vote, transcript accepted ones.
  */
-export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: SegmentReviewProps) {
+export function SegmentReview({ segments, vodUrl, audioSrc, audioPath, onClose, onSave }: SegmentReviewProps) {
     // Normalize: every segment gets stable index and duration
     const normalizedSegments = useMemo<ReviewSegment[]>(
         () =>
@@ -53,6 +54,12 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
     const current = normalizedSegments[currentIdx];
     const acceptedCount = Object.values(votes).filter((v) => v === 'accept').length;
     const rejectedCount = Object.values(votes).filter((v) => v === 'reject').length;
+
+    const audioFileName = useMemo(() => {
+        if (!audioPath) return 'unknown';
+        const parts = audioPath.split(/[/\\]/);
+        return parts[parts.length - 1] || audioPath;
+    }, [audioPath]);
 
     const formatMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
 
@@ -232,6 +239,7 @@ export function SegmentReview({ segments, vodUrl, audioSrc, onClose, onSave }: S
                         {currentIdx + 1} / {normalizedSegments.length} · Accepted {acceptedCount} · Rejected{' '}
                         {rejectedCount}
                     </p>
+                    <p className="text-[11px] text-slate-500 truncate">Audio file: {audioFileName}</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="hidden md:flex items-center gap-1 text-xs text-slate-400">

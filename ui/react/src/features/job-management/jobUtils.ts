@@ -25,7 +25,7 @@ export function getLastStep(job: Job): string {
     if (job.steps.tts) return 'TTS';
     if (job.steps.srt) return 'SRT';
     if (job.steps.sanitize) return 'Sanitize';
-    if (job.steps.audio) return 'Audio';
+    if (job.steps.audio) return 'Audio'; // legacy support
     if (job.steps.vod) return 'VOD';
     return 'Not started';
 }
@@ -35,14 +35,15 @@ export function getLastStep(job: Job): string {
  */
 export function getProgressPercent(job: Job): number {
     const completed = Object.values(job.steps).filter(Boolean).length;
-    return (completed / 5) * 100;
+    const totalSteps = 5; // vod, sanitize, review, srt, tts (train is optional)
+    return Math.min(100, (completed / totalSteps) * 100);
 }
 
 /**
  * Get array of step completion states for indicators
  */
 export function getStepStates(job: Job): Array<{ key: string; completed: boolean }> {
-    return (['vod', 'audio', 'sanitize', 'srt', 'tts'] as const).map((step) => ({
+    return (['vod', 'sanitize', 'srt', 'tts'] as const).map((step) => ({
         key: step,
         completed: !!job.steps[step],
     }));

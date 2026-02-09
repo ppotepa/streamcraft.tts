@@ -1,4 +1,4 @@
-export type StepId = 'vod' | 'audio' | 'sanitize' | 'review' | 'srt' | 'train' | 'tts';
+export type StepId = 'vod' | 'sanitize' | 'review' | 'srt' | 'train' | 'tts';
 
 export type StepStatus = string;
 

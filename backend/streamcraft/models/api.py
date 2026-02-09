@@ -11,6 +11,7 @@ class VodMetaResponse(BaseModel):
     title: str
     duration: str
     previewUrl: str
+    platform: Literal["twitch", "youtube"] = "twitch"
 
 
 class JobStatusResponse(BaseModel):
@@ -81,6 +82,7 @@ class RunSanitizeRequest(BaseModel):
     mode: Literal["auto", "voice"] = "auto"
     preset: Literal["strict", "balanced", "lenient"] = "balanced"
     strictness: float = 0.5
+    extractVocals: bool = False  # UVR AI vocal isolation preprocessing
     preview: bool = False
     previewStart: float = 0.0
     previewDuration: float = 90.0
@@ -89,6 +91,7 @@ class RunSanitizeRequest(BaseModel):
     targetLufs: float = -18.0
     truePeakLimitDb: float = -1.0
     fadeMs: int = 12
+    stream: bool = False
 
 
 class RunSanitizeResponse(BaseModel):

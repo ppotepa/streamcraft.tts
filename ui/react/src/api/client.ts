@@ -4,6 +4,7 @@ export type VodMeta = {
     duration: string;
     previewUrl: string;
     vodId: string;
+    platform: 'twitch' | 'youtube';
 };
 
 export type AudioResult = { exitCode: number; path: string; log: string[] };
@@ -53,6 +54,7 @@ export type SanitizeResult = {
     voiceSamples: { start: number; end: number; duration: number; rmsDb: number; path: string }[];
     log: string[];
 };
+export type SanitizeProgressEvent = { stage?: string; value?: number; message?: string; type?: string };
 export type SrtResult = { exitCode: number; path: string; lines: number; excerpt: string; log: string[] };
 export type TtsResult = { exitCode: number; outputPath: string; log: string[] };
 export type TtsStreamResult = { exitCode: number; outputPath: string; log: string[] };
@@ -67,10 +69,12 @@ export type Job = {
     updatedAt: string;
     steps: {
         vod: boolean;
-        audio: boolean;
         sanitize: boolean;
         srt: boolean;
         tts: boolean;
+        train?: boolean;
+        review?: boolean;
+        audio?: boolean; // legacy compatibility
     };
     outputs?: {
         audioPath?: string;
@@ -89,6 +93,9 @@ export interface WizardApi {
             mode: 'auto' | 'voice';
             preset?: 'strict' | 'balanced' | 'lenient';
             strictness?: number;
+            extractVocals?: boolean;
+            uvrModel?: 'bs-roformer' | 'mdx-net' | 'demucs';
+            uvrPrecision?: 'fp32' | 'fp16' | 'int8';
             preview?: boolean;
             previewStart?: number;
             previewDuration?: number;
@@ -103,6 +110,9 @@ export interface WizardApi {
             targetLufs?: number;
             truePeakLimitDb?: number;
             fadeMs?: number;
+            stream?: boolean;
+            onLog?: (line: string) => void;
+            onProgress?: (evt: SanitizeProgressEvent) => void;
         }
     ) => Promise<SanitizeResult>;
     runSrt: (opts: { vodUrl: string }) => Promise<SrtResult>;
@@ -153,6 +163,9 @@ class HttpApi implements WizardApi {
         mode: 'auto' | 'voice';
         preset?: 'strict' | 'balanced' | 'lenient';
         strictness?: number;
+        extractVocals?: boolean;
+        uvrModel?: 'bs-roformer' | 'mdx-net' | 'demucs';
+        uvrPrecision?: 'fp32' | 'fp16' | 'int8';
         preview?: boolean;
         previewStart?: number;
         previewDuration?: number;
@@ -167,7 +180,72 @@ class HttpApi implements WizardApi {
         targetLufs?: number;
         truePeakLimitDb?: number;
         fadeMs?: number;
+        stream?: boolean;
+        onLog?: (line: string) => void;
+        onProgress?: (evt: SanitizeProgressEvent) => void;
     }): Promise<SanitizeResult> {
+        if (opts.stream) {
+            const body = { ...opts, stream: true };
+            const res = await fetch(`${this.baseUrl}/sanitize/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || `Request failed (${res.status})`);
+            }
+
+            const reader = res.body?.getReader();
+            if (!reader) {
+                throw new Error('Streaming not supported for sanitize');
+            }
+
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            const log: string[] = [];
+            let final: SanitizeResult | null = null;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, idx).trim();
+                    buffer = buffer.slice(idx + 1);
+                    if (!line) continue;
+                    try {
+                        const evt = JSON.parse(line);
+                        if (evt.type === 'log' && evt.line) {
+                            log.push(evt.line);
+                            opts.onLog?.(evt.line);
+                        } else if (evt.type === 'progress') {
+                            opts.onProgress?.({ type: 'progress', stage: evt.stage, value: evt.value, message: evt.message });
+                        } else if (evt.type === 'stage') {
+                            opts.onProgress?.({ type: 'stage', stage: evt.stage, message: evt.message });
+                        } else if (evt.type === 'done' && evt.result) {
+                            final = evt.result as SanitizeResult;
+                        } else if (evt.type === 'error') {
+                            throw new Error(evt.error || 'Sanitize failed');
+                        }
+                    } catch (err) {
+                        // swallow malformed lines
+                    }
+                }
+            }
+
+            if (!final) {
+                throw new Error('Sanitize finished without result');
+            }
+
+            if (!final.log || final.log.length === 0) {
+                final.log = log;
+            }
+            return final;
+        }
+
         return this.post<SanitizeResult>('/sanitize/run', opts);
     }
 
@@ -202,12 +280,11 @@ class HttpApi implements WizardApi {
         const log: string[] = [];
         let outputPath = '';
         let exitCode = 0;
+        let idx = -1;
 
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let idx;
             while ((idx = buffer.indexOf('\n')) !== -1) {
                 const line = buffer.slice(0, idx).trim();
                 buffer = buffer.slice(idx + 1);
@@ -357,6 +434,7 @@ class MockApi implements WizardApi {
             duration: '3:42:18',
             previewUrl: `https://static-cdn.jtvnw.net/previews-ttv/live_user_juggernautjason-320x180.jpg?vid=${vodId}`,
             vodId,
+            platform: 'twitch',
         };
     }
 
@@ -380,6 +458,9 @@ class MockApi implements WizardApi {
         mode: 'auto' | 'voice';
         preset?: 'strict' | 'balanced' | 'lenient';
         strictness?: number;
+        extractVocals?: boolean;
+        uvrModel?: 'bs-roformer' | 'mdx-net' | 'demucs';
+        uvrPrecision?: 'fp32' | 'fp16' | 'int8';
         preview?: boolean;
         previewStart?: number;
         previewDuration?: number;
@@ -401,6 +482,9 @@ class MockApi implements WizardApi {
             mode: opts.mode,
             preset: opts.preset || 'balanced',
             strictness: typeof opts.strictness === 'number' ? opts.strictness : 0.5,
+            extractVocals: opts.extractVocals || false,
+            uvrModel: opts.uvrModel || 'bs-roformer',
+            uvrPrecision: opts.uvrPrecision || 'fp16',
             params: {
                 speechProbThreshold: opts.preset === 'strict' ? 0.75 : opts.preset === 'lenient' ? 0.55 : 0.65,
                 qualityMinScore: opts.preset === 'strict' ? 75 : opts.preset === 'lenient' ? 45 : 60,
@@ -474,8 +558,14 @@ class MockApi implements WizardApi {
 
     async runTts(opts: { vodUrl: string; text: string; streamer: string; onLog?: (line: string) => void }): Promise<TtsStreamResult> {
         await sleep(this.delayMs);
-        const log = ['[i] xtts_v2', '[i] vocoder', '[done] file written'];
-        log.forEach((l) => opts.onLog?.(l));
+        const log = [
+            `[tts] starting for ${opts.streamer}`,
+            '[tts] synthesizing... (mock)',
+            '[done] tts ready',
+        ];
+        opts.onLog?.(log[0]);
+        opts.onLog?.(log[1]);
+        opts.onLog?.(log[2]);
         return {
             exitCode: 0,
             outputPath: `out/${opts.streamer}/tts/tts_${Date.now()}.wav`,
@@ -538,7 +628,6 @@ class MockApi implements WizardApi {
     artifactUrl(): string {
         return '';
     }
-
     async getJobs(): Promise<Job[]> {
         await sleep(this.delayMs);
         return [...this.jobStore];

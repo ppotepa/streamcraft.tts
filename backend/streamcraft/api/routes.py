@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import queue
 from pathlib import Path
 
 import soundfile as sf
@@ -39,15 +41,49 @@ router = APIRouter()
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _timestamp_logs(lines: list[str]) -> list[str]:
+    now = datetime.datetime.utcnow()
+    stamped: list[str] = []
+    for idx, line in enumerate(lines):
+        stamp = (now + datetime.timedelta(seconds=idx)).strftime("%H:%M:%S")
+        stamped.append(f"[{stamp}] {line}")
+    if not lines:
+        stamped.append(f"[{now.strftime('%H:%M:%S')}] sanitize completed (no log emitted)")
+    return stamped
+
+
 @router.post("/vod/check")
 async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
-    """Check VOD and return metadata from Twitch."""
+    """Check VOD and return metadata from Twitch or YouTube."""
     try:
+        # Detect platform from URL
+        platform = "youtube" if "youtube.com" in vod_url or "youtu.be" in vod_url else "twitch"
+        
+        if platform == "youtube":
+            # YouTube support placeholder - extract video ID and return basic metadata
+            # TODO: Implement YouTube metadata fetch using yt-dlp
+            import re
+            yt_pattern = r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+)"
+            match = re.search(yt_pattern, vod_url)
+            if not match:
+                raise HTTPException(status_code=400, detail="Invalid YouTube URL")
+            video_id = match.group(1)
+            
+            return VodMetaResponse(
+                streamer="YouTube Channel",
+                vodId=video_id,
+                title="YouTube Video (metadata fetch not yet implemented)",
+                duration="0:00",
+                previewUrl=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                platform="youtube"
+            )
+        
+        # Twitch flow
         # Import inside try to catch missing twitchdl gracefully
         from twitchdl import twitch, utils  # type: ignore
 
         if not vod_url.startswith("http"):
-            raise HTTPException(status_code=400, detail="Only Twitch URLs supported for metadata fetch")
+            raise HTTPException(status_code=400, detail="Only Twitch/YouTube URLs supported for metadata fetch")
 
         vid = utils.parse_video_identifier(vod_url)
         if not vid:
@@ -84,6 +120,7 @@ async def check_vod(vod_url: str = Query(...)) -> VodMetaResponse:
             title=title,
             duration=duration,
             previewUrl=preview_url,
+            platform="twitch"
         )
 
     except ImportError:
@@ -211,6 +248,7 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             mode=mode,
             preset=preset,
             strictness=float(request.strictness),
+            extract_vocals=request.extractVocals,
             preview=request.preview,
             preview_start=request.previewStart,
             preview_duration=request.previewDuration,
@@ -226,6 +264,92 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             fade_ms=request.fadeMs,
         )
 
+        def serialize_result(result):
+            segments = result.segments
+            total_duration = sum(seg.duration for seg in segments if seg.kept)
+            timestamped_log = _timestamp_logs(result.log)
+
+            return RunSanitizeResponse(
+                cleanPath=to_workspace_relative(result.clean_path),
+                segmentsPath=to_workspace_relative(result.manifest_path),
+                segments=len(segments),
+                cleanDuration=total_duration,
+                previewSegments=[
+                    {
+                        "start": seg.start,
+                        "end": seg.end,
+                        "duration": seg.duration,
+                        "rmsDb": None,
+                        "quality": seg.quality,
+                        "speechRatio": seg.speech_ratio,
+                        "snrDb": seg.snr_db,
+                        "clipRatio": seg.clip_ratio,
+                        "sfxScore": seg.sfx_score,
+                        "speakerSim": seg.speaker_sim,
+                        "kept": seg.kept,
+                        "labels": seg.labels,
+                        "rejectReason": seg.reject_reason,
+                    }
+                    for seg in segments[:500]
+                ],
+                previewPath=to_workspace_relative(result.preview_path),
+                previewSampleRate=result.preview_sr,
+                appliedSettings={
+                    "mode": cfg.mode.value,
+                    "preset": cfg.preset.value,
+                    "strictness": cfg.strictness,
+                    "params": result.params,
+                },
+                voiceSamples=[
+                    {
+                        "start": vs.get("start"),
+                        "end": vs.get("end"),
+                        "duration": vs.get("duration"),
+                        "rmsDb": vs.get("rmsDb"),
+                        "path": to_workspace_relative(dataset_dir / Path(vs.get("path", ""))),
+                    }
+                    for vs in result.voice_samples
+                ],
+                exitCode=0,
+                log=timestamped_log,
+            )
+
+        if request.stream:
+            q: queue.Queue[dict] = queue.Queue()
+
+            def event_cb(evt: dict) -> None:
+                try:
+                    q.put(evt, block=False)
+                except Exception:
+                    pass
+
+            def worker() -> None:
+                try:
+                    result = run_sanitise_v2(
+                        request.vodUrl,
+                        out_root,
+                        dataset_root,
+                        cfg,
+                        event_cb=event_cb,
+                    )
+                    payload = serialize_result(result)
+                    q.put({"type": "done", "result": payload.dict()})
+                except FileNotFoundError as exc:
+                    q.put({"type": "error", "error": str(exc), "status": 404})
+                except Exception as exc:
+                    q.put({"type": "error", "error": f"Sanitize failed: {exc}", "status": 500})
+
+            threading.Thread(target=worker, daemon=True).start()
+
+            def iterator():
+                while True:
+                    evt = q.get()
+                    yield json.dumps(evt) + "\n"
+                    if evt.get("type") in {"done", "error"}:
+                        break
+
+            return StreamingResponse(iterator(), media_type="application/x-ndjson")
+
         result = run_sanitise_v2(
             request.vodUrl,
             out_root,
@@ -233,59 +357,8 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             cfg,
         )
 
-        segments = result.segments
-        total_duration = sum(seg.duration for seg in segments if seg.kept)
-
-        timestamped_log: list[str] = []
-        now = datetime.datetime.utcnow()
-        for idx, line in enumerate(result.log):
-            stamp = (now + datetime.timedelta(seconds=idx)).strftime("%H:%M:%S")
-            timestamped_log.append(f"[{stamp}] {line}")
-
-        return RunSanitizeResponse(
-            cleanPath=to_workspace_relative(result.clean_path),
-            segmentsPath=to_workspace_relative(result.manifest_path),
-            segments=len(segments),
-            cleanDuration=total_duration,
-            previewSegments=[
-                {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "duration": seg.duration,
-                    "rmsDb": None,
-                    "quality": seg.quality,
-                    "speechRatio": seg.speech_ratio,
-                    "snrDb": seg.snr_db,
-                    "clipRatio": seg.clip_ratio,
-                    "sfxScore": seg.sfx_score,
-                    "speakerSim": seg.speaker_sim,
-                    "kept": seg.kept,
-                    "labels": seg.labels,
-                    "rejectReason": seg.reject_reason,
-                }
-                for seg in segments[:500]
-            ],
-            previewPath=to_workspace_relative(result.preview_path),
-            previewSampleRate=result.preview_sr,
-            appliedSettings={
-                "mode": cfg.mode.value,
-                "preset": cfg.preset.value,
-                "strictness": cfg.strictness,
-                "params": result.params,
-            },
-            voiceSamples=[
-                {
-                    "start": vs.get("start"),
-                    "end": vs.get("end"),
-                    "duration": vs.get("duration"),
-                    "rmsDb": vs.get("rmsDb"),
-                    "path": to_workspace_relative(dataset_dir / Path(vs.get("path", ""))),
-                }
-                for vs in result.voice_samples
-            ],
-            exitCode=0,
-            log=timestamped_log,
-        )
+        payload = serialize_result(result)
+        return payload
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
