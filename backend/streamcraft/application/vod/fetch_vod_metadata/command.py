@@ -2,8 +2,7 @@
 
 from dataclasses import dataclass
 
-from streamcraft.domain.shared.branded_types import VodId
-from streamcraft.domain.vod.value_objects.platform import Platform
+from streamcraft.domain.vod import Platform, VodId
 
 
 @dataclass(frozen=True, slots=True)

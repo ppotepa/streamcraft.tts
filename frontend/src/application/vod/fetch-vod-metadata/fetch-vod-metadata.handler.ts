@@ -33,6 +33,17 @@ export class FetchVodMetadataHandler {
             durationSeconds: metadata.durationSeconds,
             previewUrl: metadata.previewUrl,
             platform: metadata.platform,
+            description: metadata.description ?? null,
+            url: metadata.url ?? null,
+            viewCount: metadata.viewCount ?? null,
+            createdAt: metadata.createdAt ?? null,
+            publishedAt: metadata.publishedAt ?? null,
+            language: metadata.language ?? null,
+            userId: metadata.userId ?? null,
+            userLogin: metadata.userLogin ?? null,
+            videoType: metadata.videoType ?? null,
+            gameId: metadata.gameId ?? null,
+            gameName: metadata.gameName ?? null,
         };
 
         return Result.ok(dto);

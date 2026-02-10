@@ -8,6 +8,10 @@ from streamcraft.domain.audio.value_objects.time_range import TimeRange
 from streamcraft.domain.shared.result import Result
 
 
+class AudioSlicingError(Exception):
+    """Represents slicing failures (invalid segments, ffmpeg errors, etc.)."""
+
+
 class AudioSlicer(ABC):
     """Port for slicing audio files into segments."""
 

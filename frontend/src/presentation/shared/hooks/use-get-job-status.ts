@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Result } from '../../../domain/shared/result';
+import type { Result } from '../../../domain/shared/result';
 import { JobNotFoundError } from '../../../domain/job/errors/job-errors';
 import { GetJobStatusHandler, GetJobStatusCommand, GetJobStatusDto } from '../../../application/job/get-job-status';
 import { JobId } from '../../../domain/job/value-objects/job-id';

@@ -27,6 +27,7 @@ ui/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+blobs/
 
 # Data & outputs (local only)
 dataset/

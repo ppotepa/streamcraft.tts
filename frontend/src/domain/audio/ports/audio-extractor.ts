@@ -2,7 +2,7 @@
  * Audio extractor port.
  */
 
-import { Result } from '@domain/shared/result';
+import { Result } from '../../shared/result';
 import { AudioFile } from '../entities/audio-file.entity';
 import { ExtractionFailedError } from '../errors/audio-errors';
 

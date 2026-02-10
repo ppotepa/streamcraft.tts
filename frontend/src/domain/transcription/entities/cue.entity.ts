@@ -2,10 +2,10 @@
  * Cue entity (subtitle/transcript cue).
  */
 
-import { CueId } from '@domain/shared/branded-types';
-import { TimeRange } from '@domain/audio/value-objects/time-range';
-import { ConfidenceScore } from '../value-objects/confidence-score';
-import { TranscriptText } from '../value-objects/transcript-text';
+import type { CueId } from '../../shared/branded-types';
+import type { TimeRange } from '../../audio/value-objects/time-range';
+import type { ConfidenceScore } from '../value-objects/confidence-score';
+import type { TranscriptText } from '../value-objects/transcript-text';
 
 export interface Cue {
     readonly id: CueId;

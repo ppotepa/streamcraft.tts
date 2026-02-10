@@ -4,7 +4,7 @@ Retry Job Use Case - Command
 
 from dataclasses import dataclass
 
-from ...domain.job.value_objects import JobId
+from streamcraft.domain.shared.branded_types import JobId
 
 
 @dataclass(frozen=True)

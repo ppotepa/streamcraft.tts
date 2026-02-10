@@ -2,8 +2,7 @@
  * Transcription domain exports.
  */
 
-export * from './entities/cue.entity';
-export * from './entities/transcript.entity';
+export * from './entities';
 export * from './errors/transcription-errors';
 export * from './ports/transcriber';
 export * from './ports/subtitle-parser';

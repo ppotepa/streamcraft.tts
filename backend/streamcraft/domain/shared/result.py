@@ -94,6 +94,10 @@ class Failure(Generic[E]):
 
 Result = Success[T] | Failure[E]
 
+# Backwards-compatible aliases for existing call sites
+Ok = Success
+Err = Failure
+
 
 def ok(value: T) -> Success[T]:
     """Create a Success result."""

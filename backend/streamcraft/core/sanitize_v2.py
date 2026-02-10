@@ -535,7 +535,13 @@ def _select_voice_samples(audio: np.ndarray, sr: int, segments: List[SegmentDiag
 # ---------------- Main entry -----------------
 
 
-def _extract_vocals_uvr(input_path: Path, output_dir: Path, log: List[str], event_cb: Optional[Callable[[dict], None]] = None) -> Path:
+def _extract_vocals_uvr(
+	input_path: Path,
+	output_dir: Path,
+	log: List[str],
+	event_cb: Optional[Callable[[dict], None]] = None,
+	should_cancel: Optional[Callable[[], bool]] = None,
+) -> Path:
 	"""Extract vocals using audio-separator (UVR models) with detailed progress logging and callbacks."""
 
 	def send(evt: dict) -> None:
@@ -549,10 +555,16 @@ def _extract_vocals_uvr(input_path: Path, output_dir: Path, log: List[str], even
 		log.append(line)
 		send({"type": "log", "line": line})
 
+	def is_cancelled() -> bool:
+		return bool(should_cancel and should_cancel())
+
 	emit("[UVR] Starting vocal extraction (Ultimate Vocal Remover AI)...")
 	emit(f"[UVR] Input: {input_path}")
 	emit(f"[UVR] Output dir (will be created): {output_dir}")
 	send({"type": "stage", "stage": "uvr", "message": "starting"})
+
+	if is_cancelled():
+		raise RuntimeError("Sanitize canceled by user")
 
 	# Keep UVR temp outputs in a dedicated subdir to avoid clobbering VOD assets
 	uvr_out_dir = output_dir / "vocals"
@@ -640,6 +652,14 @@ def _extract_vocals_uvr(input_path: Path, output_dir: Path, log: List[str], even
 		processing_started = False
 
 		for line in process.stdout:
+			if is_cancelled():
+				emit("[UVR] Cancel requested. Terminating process...")
+				process.terminate()
+				try:
+					process.wait(timeout=10)
+				except Exception:
+					process.kill()
+				raise RuntimeError("Sanitize canceled by user")
 			line = line.strip()
 			if not line:
 				continue
@@ -675,6 +695,8 @@ def _extract_vocals_uvr(input_path: Path, output_dir: Path, log: List[str], even
 				emit(f"[UVR] {line}")
 
 		process.wait()
+		if is_cancelled():
+			raise RuntimeError("Sanitize canceled by user")
 
 		if process.returncode != 0:
 			emit(f"[UVR] ❌ Separation failed with exit code {process.returncode}")
@@ -720,126 +742,151 @@ def run_sanitise_v2(
     dataset_root: Path,
     cfg: SanitiseConfig,
     event_cb: Optional[Callable[[dict], None]] = None,
+	should_cancel: Optional[Callable[[], bool]] = None,
 ) -> SanitiseResult:
-    log: List[str] = []
+	log: List[str] = []
 
-    def send(evt: dict) -> None:
-        if event_cb:
-            try:
-                event_cb(evt)
-            except Exception:
-                pass
+	def send(evt: dict) -> None:
+		if event_cb:
+			try:
+				event_cb(evt)
+			except Exception:
+				pass
 
-    def emit(line: str) -> None:
-        log.append(line)
-        send({"type": "log", "line": line})
+	def emit(line: str) -> None:
+		log.append(line)
+		send({"type": "log", "line": line})
 
-    _, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
-    vod_slug = vod_dir.name
-    input_audio = vod_dir / f"{vod_slug}_full.wav"
-    clean_path = vod_dir / f"{vod_slug}_clean.wav"
-    preview_path = vod_dir / f"{vod_slug}_preview.wav"
-    manifest_path = dataset_dir / f"{vod_slug}_segments.json"
+	def check_cancel(stage: str) -> None:
+		if should_cancel and should_cancel():
+			emit(f"[cancel] requested during {stage}")
+			raise RuntimeError("Sanitize canceled by user")
 
-    emit(f"[init] vod_dir={vod_dir}")
-    emit(f"[init] dataset_dir={dataset_dir}")
-    emit(f"[init] input_audio={input_audio}")
+	_, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
+	vod_slug = vod_dir.name
+	input_audio = vod_dir / f"{vod_slug}_full.wav"
+	clean_path = vod_dir / f"{vod_slug}_clean.wav"
+	preview_path = vod_dir / f"{vod_slug}_preview.wav"
+	manifest_path = dataset_dir / f"{vod_slug}_segments.json"
 
-    if not input_audio.exists():
-        raise FileNotFoundError(f"Missing input audio: {input_audio}")
+	emit(f"[init] vod_dir={vod_dir}")
+	emit(f"[init] dataset_dir={dataset_dir}")
+	emit(f"[init] input_audio={input_audio}")
+	check_cancel("init")
 
-    # UVR Vocal Extraction (if enabled) - runs for both AUTO and VOICE modes
-    if cfg.extract_vocals:
-        emit("=" * 60)
-        emit("🎵 VOCAL EXTRACTION MODE ENABLED (UVR AI)")
-        emit("=" * 60)
-        vocals_dir = vod_dir  # store alongside VOD assets
-        emit(f"[UVR] target dir: {vocals_dir}")
-        try:
-            vocals_path = _extract_vocals_uvr(input_audio, vocals_dir, log, event_cb)
-            final_vocals_path = vocals_dir / f"{vod_slug}_vocals.wav"
-            if vocals_path != final_vocals_path:
-                final_vocals_path.write_bytes(vocals_path.read_bytes())
-                emit(f"[UVR] renamed vocals -> {final_vocals_path.name}")
-            input_audio = final_vocals_path  # Use extracted vocals for sanitization
-            emit("=" * 60)
-            emit("✓ Vocal extraction complete - proceeding with sanitization...")
-            emit("=" * 60)
-        except Exception as e:
-            emit(f"⚠️ Vocal extraction failed: {e}")
-            emit("⚠️ Falling back to original audio...")
-            # Continue with original audio on failure
+	if not input_audio.exists():
+		raise FileNotFoundError(f"Missing input audio: {input_audio}")
 
-    send({"type": "stage", "stage": "segment", "message": "loading"})
-    emit(f"Loading audio {input_audio}")
-    audio, sr = _load_audio(input_audio)
-    emit(f"Loaded waveform sr={sr} hz, duration={len(audio)/sr:.2f}s")
-    emit(f"[stats] rms_estimate={float(np.mean(np.abs(audio))):.4f}")
+	# UVR Vocal Extraction (if enabled) - runs for both AUTO and VOICE modes
+	if cfg.extract_vocals:
+		emit("=" * 60)
+		emit("🎵 VOCAL EXTRACTION MODE ENABLED (UVR AI)")
+		emit("=" * 60)
+		vocals_dir = vod_dir  # store alongside VOD assets
+		emit(f"[UVR] target dir: {vocals_dir}")
+		try:
+			check_cancel("uvr")
+			vocals_path = _extract_vocals_uvr(
+				input_audio,
+				vocals_dir,
+				log,
+				event_cb,
+				should_cancel=should_cancel,
+			)
+			final_vocals_path = vocals_dir / f"{vod_slug}_vocals.wav"
+			if vocals_path != final_vocals_path:
+				final_vocals_path.write_bytes(vocals_path.read_bytes())
+				emit(f"[UVR] renamed vocals -> {final_vocals_path.name}")
+			input_audio = final_vocals_path  # Use extracted vocals for sanitization
+			emit("=" * 60)
+			emit("✓ Vocal extraction complete - proceeding with sanitization...")
+			emit("=" * 60)
+		except Exception as e:
+			emit(f"⚠️ Vocal extraction failed: {e}")
+			emit("⚠️ Falling back to original audio...")
+			# Continue with original audio on failure
 
-    if cfg.preview:
-        start = max(0.0, cfg.preview_start)
-        end = min(len(audio) / sr, start + cfg.preview_duration)
-        start_idx = int(start * sr)
-        end_idx = int(end * sr)
-        emit(f"Preview window: {start:.2f}s-{end:.2f}s")
-        audio = audio[start_idx:end_idx]
+	send({"type": "stage", "stage": "segment", "message": "loading"})
+	emit(f"Loading audio {input_audio}")
+	audio, sr = _load_audio(input_audio)
+	emit(f"Loaded waveform sr={sr} hz, duration={len(audio)/sr:.2f}s")
+	emit(f"[stats] rms_estimate={float(np.mean(np.abs(audio))):.4f}")
+	check_cancel("load-audio")
 
-    params = _apply_strictness(_preset_baseline(cfg.preset), cfg.strictness)
+	if cfg.preview:
+		start = max(0.0, cfg.preview_start)
+		end = min(len(audio) / sr, start + cfg.preview_duration)
+		start_idx = int(start * sr)
+		end_idx = int(end * sr)
+		emit(f"Preview window: {start:.2f}s-{end:.2f}s")
+		audio = audio[start_idx:end_idx]
 
-    features = extract_features(audio, sr, cfg)
-    mask = _build_keep_mask(features, params, cfg)
-    segments_idx = _mask_to_segments(mask, params, total_frames=len(features.vad_prob))
-    segments_idx = _apply_preroll_postroll(segments_idx, params, len(features.vad_prob))
-    segments_idx = _merge_segments(segments_idx, params, cfg.preserve_pauses)
-    emit(f"[segments] candidate_count={len(segments_idx)}")
+	params = _apply_strictness(_preset_baseline(cfg.preset), cfg.strictness)
 
-    segments: List[SegmentDiagnostics] = []
-    for s, e in segments_idx:
-        start_t = s * 0.02
-        end_t = e * 0.02
-        seg_audio = audio[int(start_t * sr) : int(end_t * sr)]
-        segments.append(_segment_quality(seg_audio, features, s, e, params, cfg))
+	features = extract_features(audio, sr, cfg)
+	mask = _build_keep_mask(features, params, cfg)
+	segments_idx = _mask_to_segments(mask, params, total_frames=len(features.vad_prob))
+	segments_idx = _apply_preroll_postroll(segments_idx, params, len(features.vad_prob))
+	segments_idx = _merge_segments(segments_idx, params, cfg.preserve_pauses)
+	emit(f"[segments] candidate_count={len(segments_idx)}")
+	check_cancel("segment-build")
 
-    kept = sum(1 for s in segments if s.kept)
-    emit(f"Detected {len(segments)} segments; kept {kept}")
-    send({"type": "progress", "stage": "segment", "value": 100.0})
+	segments: List[SegmentDiagnostics] = []
+	for idx, (s, e) in enumerate(segments_idx):
+		if idx % 50 == 0:
+			check_cancel("segment-score")
+		start_t = s * 0.02
+		end_t = e * 0.02
+		seg_audio = audio[int(start_t * sr) : int(end_t * sr)]
+		segments.append(_segment_quality(seg_audio, features, s, e, params, cfg))
 
-    clean_audio = _concat_kept(audio, sr, segments, cfg)
-    clean_audio = _normalize_lufs_like(clean_audio, cfg.target_lufs, cfg.true_peak_limit_db)
+	kept = sum(1 for s in segments if s.kept)
+	emit(f"Detected {len(segments)} segments; kept {kept}")
+	send({"type": "progress", "stage": "segment", "value": 100.0})
 
-    if clean_audio.size == 0:
-        raise ValueError("No speech retained after sanitization")
+	clean_audio = _concat_kept(audio, sr, segments, cfg)
+	clean_audio = _normalize_lufs_like(clean_audio, cfg.target_lufs, cfg.true_peak_limit_db)
+	check_cancel("render")
 
-    clean_path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(str(clean_path), clean_audio, sr)
-    emit(f"[write] clean audio -> {clean_path} (sr={sr}, duration={len(clean_audio)/sr:.2f}s)")
+	if clean_audio.size == 0:
+		raise ValueError("No speech retained after sanitization")
 
-    preview_audio = _resample_linear(clean_audio, sr, PREVIEW_SAMPLE_RATE)
-    sf.write(str(preview_path), preview_audio, PREVIEW_SAMPLE_RATE)
-    emit(f"[write] preview -> {preview_path} (sr={PREVIEW_SAMPLE_RATE}, duration={len(preview_audio)/PREVIEW_SAMPLE_RATE:.2f}s)")
-    send({"type": "progress", "stage": "preview", "value": 100.0})
+	clean_path.parent.mkdir(parents=True, exist_ok=True)
+	sf.write(str(clean_path), clean_audio, sr)
+	emit(f"[write] clean audio -> {clean_path} (sr={sr}, duration={len(clean_audio)/sr:.2f}s)")
+	check_cancel("write-clean")
 
-    _write_manifest(manifest_path, sr, input_audio, cfg, params, segments)
-    emit(f"[write] manifest -> {manifest_path} (segments={len(segments)})")
+	preview_audio = _resample_linear(clean_audio, sr, PREVIEW_SAMPLE_RATE)
+	sf.write(str(preview_path), preview_audio, PREVIEW_SAMPLE_RATE)
+	emit(
+		f"[write] preview -> {preview_path} (sr={PREVIEW_SAMPLE_RATE}, duration={len(preview_audio)/PREVIEW_SAMPLE_RATE:.2f}s)"
+	)
+	send({"type": "progress", "stage": "preview", "value": 100.0})
+	check_cancel("write-preview")
 
-    voice_samples = _select_voice_samples(audio, sr, segments, cfg) if cfg.mode == SanitiseMode.VOICE else []
-    if voice_samples:
-        vs_dir = dataset_dir / "voice_samples"
-        vs_dir.mkdir(parents=True, exist_ok=True)
-        for vs in voice_samples:
-            start_idx = max(0, int(vs["start"] * sr))
-            end_idx = min(len(audio), int(vs["end"] * sr))
-            chunk = audio[start_idx:end_idx]
-            sf.write(str(vs_dir / Path(vs["path"]).name), chunk, sr)
-        emit(f"[voice] saved {len(voice_samples)} sample(s) -> {vs_dir}")
+	_write_manifest(manifest_path, sr, input_audio, cfg, params, segments)
+	emit(f"[write] manifest -> {manifest_path} (segments={len(segments)})")
+	check_cancel("write-manifest")
 
-    return SanitiseResult(
-        clean_path=clean_path,
-        manifest_path=manifest_path,
-        preview_path=preview_path,
-        segments=segments,
-        preview_sr=PREVIEW_SAMPLE_RATE,
-        params=params,
-        voice_samples=voice_samples,
-        log=log,
-    )
+	voice_samples = _select_voice_samples(audio, sr, segments, cfg) if cfg.mode == SanitiseMode.VOICE else []
+	check_cancel("voice-samples")
+	if voice_samples:
+		vs_dir = dataset_dir / "voice_samples"
+		vs_dir.mkdir(parents=True, exist_ok=True)
+		for vs in voice_samples:
+			start_idx = max(0, int(vs["start"] * sr))
+			end_idx = min(len(audio), int(vs["end"] * sr))
+			chunk = audio[start_idx:end_idx]
+			sf.write(str(vs_dir / Path(vs["path"]).name), chunk, sr)
+		emit(f"[voice] saved {len(voice_samples)} sample(s) -> {vs_dir}")
+
+	return SanitiseResult(
+		clean_path=clean_path,
+		manifest_path=manifest_path,
+		preview_path=preview_path,
+		segments=segments,
+		preview_sr=PREVIEW_SAMPLE_RATE,
+		params=params,
+		voice_samples=voice_samples,
+		log=log,
+	)

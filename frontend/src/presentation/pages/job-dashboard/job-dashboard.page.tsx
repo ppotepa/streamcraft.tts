@@ -28,7 +28,7 @@ export const JobDashboardPage: React.FC = () => {
         if (data?.jobs) {
             const total = Math.ceil(data.jobs.length / ITEMS_PER_PAGE);
             setTotalPages(total);
-            
+
             const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
             const endIndex = startIndex + ITEMS_PER_PAGE;
             setPaginatedJobs(data.jobs.slice(startIndex, endIndex));

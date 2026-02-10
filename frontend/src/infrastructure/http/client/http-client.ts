@@ -2,7 +2,7 @@
  * HTTP client abstraction.
  */
 
-import { Result } from '../../../domain/shared/result';
+import type { Result } from '../../../domain/shared/result';
 
 export interface HttpResponse<T> {
     readonly data: T;

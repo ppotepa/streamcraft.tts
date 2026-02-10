@@ -10,22 +10,30 @@ export type Result<T, E> = Success<T, E> | Failure<T, E>;
 export interface Success<T, E> {
     readonly ok: true;
     readonly value: T;
+    isSuccess(): this is Success<T, E>;
+    isFailure(): this is Failure<T, E>;
 }
 
 export interface Failure<T, E> {
     readonly ok: false;
     readonly error: E;
+    isSuccess(): this is Success<T, E>;
+    isFailure(): this is Failure<T, E>;
 }
 
 // Constructors
 export const Ok = <T, E = never>(value: T): Success<T, E> => ({
     ok: true,
     value,
+    isSuccess: () => true,
+    isFailure: () => false,
 });
 
 export const Err = <T = never, E = unknown>(error: E): Failure<T, E> => ({
     ok: false,
     error,
+    isSuccess: () => false,
+    isFailure: () => true,
 });
 
 // Type guards
@@ -87,3 +95,9 @@ export const match = <T, E, U>(
 ): U => {
     return result.ok ? matcher.ok(result.value) : matcher.err(result.error);
 };
+
+// Result namespace for static methods (backwards compatibility)
+export const Result = {
+    ok: Ok,
+    fail: Err,
+} as const;

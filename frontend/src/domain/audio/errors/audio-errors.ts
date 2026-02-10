@@ -2,7 +2,7 @@
  * Audio domain errors.
  */
 
-import { DomainError, ValidationError } from '@domain/shared/errors';
+import { DomainError, ValidationError } from '../../shared/errors';
 
 export class InvalidAudioFormatError extends ValidationError {
     readonly code = 'INVALID_AUDIO_FORMAT';

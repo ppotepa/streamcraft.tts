@@ -21,6 +21,19 @@ class TranscriptionFailedError(DomainError):
 
 
 @dataclass(frozen=True, slots=True)
+class TranscriptionNotFoundError(DomainError):
+    """Error when transcription is not found."""
+
+    transcript_id: str
+
+    def __init__(self, transcript_id: str) -> None:
+        """Initialize transcription not found error."""
+        object.__setattr__(self, "transcript_id", transcript_id)
+        object.__setattr__(self, "message", f"Transcription not found: {transcript_id}")
+        object.__setattr__(self, "code", "TRANSCRIPTION_NOT_FOUND")
+
+
+@dataclass(frozen=True, slots=True)
 class InvalidSubtitleFormatError(ValidationError):
     """Error when subtitle format is invalid."""
 

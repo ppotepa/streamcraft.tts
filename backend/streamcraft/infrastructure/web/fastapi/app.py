@@ -11,6 +11,7 @@ from streamcraft.infrastructure.web.fastapi.routes import (
     transcription_router,
     vod_router,
 )
+from streamcraft.api import routes as legacy_routes
 
 
 def create_app() -> FastAPI:
@@ -30,13 +31,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Register routers
-    app.include_router(job_router)
-    app.include_router(job_extended_router)
-    app.include_router(vod_router)
-    app.include_router(audio_router)
-    app.include_router(transcription_router)
-    app.include_router(dataset_router)
+    # Register routers with /api prefix
+    app.include_router(job_router, prefix="/api")
+    app.include_router(job_extended_router, prefix="/api")
+    app.include_router(vod_router, prefix="/api")
+    app.include_router(audio_router, prefix="/api")
+    app.include_router(transcription_router, prefix="/api")
+    app.include_router(dataset_router, prefix="/api")
+    app.include_router(legacy_routes.router, prefix="/api/legacy")
 
     # Health check endpoint
     @app.get("/health")

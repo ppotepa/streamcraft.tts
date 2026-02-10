@@ -3,7 +3,7 @@
  * Communicates with backend API to extract audio from video
  */
 
-import { Result, ok, err } from '../../../domain/shared/result';
+import { Result, Ok, Err } from '../../../domain/shared/result';
 import { AudioFile } from '../../../domain/audio/entities/audio-file';
 import { AudioExtractor } from '../../../domain/audio/ports/audio-extractor';
 import { HttpClient } from '../client/http-client';
@@ -32,11 +32,11 @@ export class HttpAudioExtractor implements AudioExtractor {
                 sample_rate: sampleRate,
             });
 
-            if (response.isErr()) {
-                return err(response.error);
+            if (!response.ok) {
+                return Err(response.error);
             }
 
-            const data = response.value;
+            const data = response.value.data;
             // Create AudioFile entity from response
             // Note: This is a simplified version. Real implementation would use proper entity creation
             const audioFile: AudioFile = {
@@ -47,9 +47,9 @@ export class HttpAudioExtractor implements AudioExtractor {
                 format: data.format,
             } as AudioFile;
 
-            return ok(audioFile);
+            return Ok(audioFile);
         } catch (error) {
-            return err(
+            return Err(
                 error instanceof Error ? error : new Error('Failed to extract audio')
             );
         }

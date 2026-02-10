@@ -3,8 +3,7 @@
 from streamcraft.application.transcription.get_transcript.command import GetTranscriptCommand
 from streamcraft.application.transcription.get_transcript.dto import CueDto, GetTranscriptDto
 from streamcraft.domain.common.result import Err, Ok, Result
-from streamcraft.domain.transcription import TranscriptionNotFoundError
-from streamcraft.domain.transcription.repository import TranscriptionRepository
+from streamcraft.domain.transcription import TranscriptionNotFoundError, TranscriptionRepository
 
 
 class GetTranscriptHandler:

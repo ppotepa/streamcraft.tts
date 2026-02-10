@@ -1,9 +1,10 @@
 """VOD errors."""
 
-from streamcraft.domain.vod.errors.metadata_fetch_failed_error import MetadataFetchFailedError
 from streamcraft.domain.vod.errors.vod_download_failed_error import VodDownloadFailedError
+from streamcraft.domain.vod.errors.vod_errors import InvalidVodUrlError, MetadataFetchFailedError
 
 __all__ = [
+    "InvalidVodUrlError",
     "MetadataFetchFailedError",
     "VodDownloadFailedError",
 ]

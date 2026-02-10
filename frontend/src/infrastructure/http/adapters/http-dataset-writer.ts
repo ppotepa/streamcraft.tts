@@ -3,7 +3,7 @@
  * Communicates with backend API to export datasets
  */
 
-import { Result, ok, err } from '../../../domain/shared/result';
+import { Result, Ok, Err } from '../../../domain/shared/result';
 import { DatasetWriter } from '../../../domain/dataset/ports/dataset-writer';
 import { Dataset } from '../../../domain/dataset/entities/dataset';
 import { HttpClient } from '../client/http-client';
@@ -27,17 +27,17 @@ export class HttpDatasetWriter implements DatasetWriter {
                 format,
             });
 
-            if (response.isErr()) {
-                return err(response.error);
+            if (!response.ok) {
+                return Err(response.error);
             }
 
-            const data = response.value;
-            return ok({
+            const data = response.value.data;
+            return Ok({
                 path: data.output_path,
                 size: data.file_size_bytes,
             });
         } catch (error) {
-            return err(
+            return Err(
                 error instanceof Error ? error : new Error('Failed to export dataset')
             );
         }

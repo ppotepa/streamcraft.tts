@@ -2,7 +2,7 @@
  * Transcriber port.
  */
 
-import { Result } from '@domain/shared/result';
+import { Result } from '../../shared/result';
 import { Transcript } from '../entities/transcript.entity';
 import { TranscriptionFailedError } from '../errors/transcription-errors';
 import { LanguageCode } from '../value-objects/language-code';

@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -25,6 +26,7 @@ from streamcraft.models.api import (
     RunTtsResponse,
     RunTrainRequest,
     RunTrainResponse,
+    CreateJobRequest,
     SaveSegmentReviewRequest,
     SaveSegmentReviewResponse,
     GetSegmentReviewResponse,
@@ -32,13 +34,33 @@ from streamcraft.models.api import (
     ExportClipsRequest,
     ExportClipsResponse,
     ExportClipItem,
+    SegmentManifestResponse,
+    SegmentManifestItem,
     JobResponse,
     UpdateJobRequest,
+    TranscribeSegmentRequest,
+    TranscribeSegmentWord,
 )
 from streamcraft.settings import get_settings
 
 router = APIRouter()
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+_sanitize_cancel_lock = threading.Lock()
+_sanitize_cancel_events: dict[str, threading.Event] = {}
+
+
+def _get_sanitize_cancel_event(job_id: str) -> threading.Event:
+    with _sanitize_cancel_lock:
+        event = _sanitize_cancel_events.get(job_id)
+        if not event:
+            event = threading.Event()
+            _sanitize_cancel_events[job_id] = event
+        return event
+
+
+def _clear_sanitize_cancel_event(job_id: str) -> None:
+    with _sanitize_cancel_lock:
+        _sanitize_cancel_events.pop(job_id, None)
 
 
 def _timestamp_logs(lines: list[str]) -> list[str]:
@@ -314,6 +336,11 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                 log=timestamped_log,
             )
 
+        cancel_event = None
+        if request.jobId:
+            cancel_event = _get_sanitize_cancel_event(request.jobId)
+            cancel_event.clear()
+
         if request.stream:
             q: queue.Queue[dict] = queue.Queue()
 
@@ -331,6 +358,7 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                         dataset_root,
                         cfg,
                         event_cb=event_cb,
+                        should_cancel=cancel_event.is_set if cancel_event else None,
                     )
                     try:
                         payload = serialize_result(result)
@@ -347,7 +375,11 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                     q.put({"type": "log", "line": f"[ERROR] {traceback.format_exc()}"})
                 except Exception as exc:
                     import traceback
-                    error_msg = f"Sanitize failed: {exc}"
+                    exc_text = str(exc)
+                    if "canceled by user" in exc_text.lower():
+                        error_msg = "Sanitize canceled by user"
+                    else:
+                        error_msg = f"Sanitize failed: {exc}"
                     try:
                         q.put({"type": "error", "error": error_msg, "status": 500})
                         q.put({"type": "log", "line": f"[ERROR] {error_msg}"})
@@ -358,6 +390,10 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                             q.put({"type": "error", "error": "Sanitize failed with unrecoverable error", "status": 500})
                         except:
                             pass  # Nothing more we can do
+
+                finally:
+                    if request.jobId:
+                        _clear_sanitize_cancel_event(request.jobId)
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -375,14 +411,28 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             out_root,
             dataset_root,
             cfg,
+            should_cancel=cancel_event.is_set if cancel_event else None,
         )
 
         payload = serialize_result(result)
+        if request.jobId:
+            _clear_sanitize_cancel_event(request.jobId)
         return payload
     except FileNotFoundError as exc:
+        if request.jobId:
+            _clear_sanitize_cancel_event(request.jobId)
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
+        if request.jobId:
+            _clear_sanitize_cancel_event(request.jobId)
         raise HTTPException(status_code=500, detail=f"Sanitize failed: {exc}")
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> dict:
+    event = _get_sanitize_cancel_event(job_id)
+    event.set()
+    return {"status": "cancel-requested"}
 
 
 def _segment_review_path(vod_url: str, out_root: Path, dataset_root: Path) -> Path:
@@ -409,6 +459,79 @@ def _load_manifest(manifest_path: Path) -> dict:
         return json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Corrupted manifest: {exc}")
+
+
+@router.get("/sanitize/segments")
+async def get_sanitize_segments(
+    vodUrl: str = Query(..., description="VOD URL the segments belong to"),
+    outdir: str = Query("out"),
+    datasetOut: str = Query("dataset"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
+) -> SegmentManifestResponse:
+    from streamcraft.core.pipeline import resolve_output_dirs
+
+    out_root = Path(outdir or "out")
+    dataset_root = Path(datasetOut or "dataset")
+    _, vod_dir, dataset_dir = resolve_output_dirs(vodUrl, out_root, dataset_root)
+    manifest_path = dataset_dir / f"{vod_dir.name}_segments.json"
+    payload = _load_manifest(manifest_path)
+
+    clean_path = vod_dir / f"{vod_dir.name}_clean.wav"
+    clean_path_rel = to_workspace_relative(clean_path) if clean_path.exists() else None
+    original_path = vod_dir / f"{vod_dir.name}_full.wav"
+    original_path_rel = to_workspace_relative(original_path) if original_path.exists() else None
+
+    segments = payload.get("segments") or []
+    sample_rate = int(payload.get("source", {}).get("sample_rate") or 0)
+
+    total = len(segments)
+    slice_start = min(max(0, offset), total)
+    slice_end = min(total, slice_start + limit)
+
+    clean_offsets: dict[int, tuple[float, float]] = {}
+    cursor = 0.0
+    for idx, seg in enumerate(segments):
+        if not seg.get("kept"):
+            continue
+        duration = float(seg.get("dur", 0.0))
+        clean_offsets[idx] = (cursor, cursor + duration)
+        cursor += duration
+
+    items: list[SegmentManifestItem] = []
+    for idx in range(slice_start, slice_end):
+        seg = segments[idx]
+        clean_start, clean_end = clean_offsets.get(idx, (None, None))
+        items.append(
+            SegmentManifestItem(
+                index=idx,
+                start=float(seg.get("start", 0.0)),
+                end=float(seg.get("end", 0.0)),
+                duration=float(seg.get("dur", 0.0)),
+                cleanStart=clean_start,
+                cleanEnd=clean_end,
+                kept=seg.get("kept"),
+                quality=seg.get("quality"),
+                speechRatio=seg.get("speech_ratio"),
+                snrDb=seg.get("snr_db"),
+                clipRatio=seg.get("clip_ratio"),
+                sfxScore=seg.get("sfx_score"),
+                speakerSim=seg.get("speaker_sim"),
+                labels=seg.get("labels") or [],
+                rejectReason=seg.get("reject_reason") or [],
+            )
+        )
+
+    return SegmentManifestResponse(
+        sampleRate=sample_rate,
+        cleanPath=clean_path_rel,
+        originalPath=original_path_rel,
+        segments=items,
+        total=total,
+        offset=slice_start,
+        limit=limit,
+        hasMore=slice_end < total,
+    )
 
 
 @router.post("/train/run")
@@ -742,6 +865,160 @@ async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc} | {last}")
 
 
+@router.post("/srt/transcribe-segment")
+async def transcribe_segment(request: TranscribeSegmentRequest):
+    """Transcribe a single segment with word-level timestamps, streaming results as NDJSON."""
+    import tempfile
+    import numpy as np
+    from faster_whisper import WhisperModel
+    
+    try:
+        from streamcraft.core.pipeline import resolve_output_dirs
+        from streamcraft.core.transcribe import detect_device, ensure_cuda_dlls_available
+        
+        # Resolve paths
+        out_root = Path(request.outdir or "out")
+        dataset_root = Path(request.datasetOut or "dataset")
+        _, vod_dir, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
+        
+        # Load segment manifest
+        manifest_path = dataset_dir / f"{vod_dir.name}_segments.json"
+        if not manifest_path.exists():
+            raise HTTPException(status_code=404, detail="Segment manifest not found")
+        
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        
+        segments = payload.get("segments", [])
+        if request.segmentIndex < 0 or request.segmentIndex >= len(segments):
+            raise HTTPException(status_code=400, detail="Invalid segment index")
+        
+        segment = segments[request.segmentIndex]
+        start_time = float(segment.get("start", 0.0))
+        end_time = float(segment.get("end", 0.0))
+        duration = end_time - start_time
+        
+        if duration <= 0:
+            raise HTTPException(status_code=400, detail="Invalid segment duration")
+        
+        # Determine audio source - prefer clean, fallback to original
+        clean_path = vod_dir / f"{vod_dir.name}_clean.wav"
+        original_path = vod_dir / f"{vod_dir.name}_full.wav"
+        
+        # Check if segment has clean audio (was kept during sanitization)
+        kept = segment.get("kept", False)
+        
+        if kept and clean_path.exists():
+            # Use clean audio with cleanStart/cleanEnd if available
+            audio_path = clean_path
+            # Need to calculate clean offsets like in get_sanitize_segments
+            clean_offsets = {}
+            cursor = 0.0
+            for idx, seg in enumerate(segments):
+                if not seg.get("kept"):
+                    continue
+                dur = float(seg.get("dur", 0.0))
+                clean_offsets[idx] = (cursor, cursor + dur)
+                cursor += dur
+            
+            if request.segmentIndex in clean_offsets:
+                start_time, end_time = clean_offsets[request.segmentIndex]
+            else:
+                # Fallback to original if clean offsets not found
+                audio_path = original_path
+                start_time = float(segment.get("start", 0.0))
+                end_time = float(segment.get("end", 0.0))
+        else:
+            # Use original audio
+            if not original_path.exists():
+                raise HTTPException(status_code=404, detail="Audio file not found")
+            audio_path = original_path
+            start_time = float(segment.get("start", 0.0))
+            end_time = float(segment.get("end", 0.0))
+        
+        # Load audio and extract segment
+        audio_data, sample_rate = sf.read(audio_path)
+        start_sample = int(start_time * sample_rate)
+        end_sample = int(end_time * sample_rate)
+        segment_audio = audio_data[start_sample:end_sample]
+        
+        # Save temporary segment audio file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            sf.write(tmp_path, segment_audio, sample_rate)
+
+        # Initialize Whisper model
+        device, compute_type = detect_device("cuda", "float16")
+        if device == "cuda":
+            ensure_cuda_dlls_available()
+        
+        model = WhisperModel("base", device=device, compute_type=compute_type, cpu_threads=4)
+        
+        # Stream transcription results as NDJSON
+        async def generate():
+            try:
+                segments_iter, info = model.transcribe(
+                    str(tmp_path),
+                    language=None,
+                    vad_filter=True,
+                    beam_size=5,
+                    word_timestamps=True,
+                )
+                
+                # Send metadata
+                yield json.dumps({
+                    "type": "metadata",
+                    "language": info.language,
+                    "duration": duration,
+                }) + "\n"
+                
+                # Stream words
+                for seg in segments_iter:
+                    if hasattr(seg, 'words') and seg.words:
+                        for word_info in seg.words:
+                            word_data = {
+                                "type": "word",
+                                "word": word_info.word.strip(),
+                                "start": word_info.start,
+                                "end": word_info.end,
+                                "probability": word_info.probability,
+                            }
+                            yield json.dumps(word_data) + "\n"
+                    else:
+                        # Fallback if no word timestamps
+                        yield json.dumps({
+                            "type": "segment",
+                            "text": seg.text.strip(),
+                            "start": seg.start,
+                            "end": seg.end,
+                        }) + "\n"
+                
+                # Send completion
+                yield json.dumps({"type": "done"}) + "\n"
+                
+            except Exception as exc:
+                yield json.dumps({
+                    "type": "error",
+                    "message": str(exc),
+                }) + "\n"
+            finally:
+                # Cleanup temporary file after streaming finishes
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+        
+        return StreamingResponse(generate(), media_type="application/x-ndjson")
+    
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[transcribe-segment] exception: {exc}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Segment transcription failed: {exc}")
+
+
 @router.post("/tts/run")
 async def run_tts(request: RunTtsRequest):
     """Generate TTS output using XTTS v2. Supports streaming logs when stream=True."""
@@ -886,6 +1163,15 @@ async def run_tts(request: RunTtsRequest):
 
 # Job Management Routes
 
+@router.post("/jobs")
+async def create_job(request: CreateJobRequest) -> JobResponse:
+    """Create a legacy job entry for the wizard."""
+    from streamcraft.jobs.storage import create_job as create_job_storage
+
+    streamer = (request.streamer or "unknown").strip() or "unknown"
+    title = (request.title or "Untitled").strip() or "Untitled"
+    return create_job_storage(request.vodUrl, streamer=streamer, title=title)
+
 @router.get("/jobs")
 async def get_jobs() -> list[JobResponse]:
     """Get all jobs."""
@@ -921,6 +1207,41 @@ async def delete_job(job_id: str) -> dict:
     if not success:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"status": "deleted"}
+
+
+@router.delete("/jobs/{job_id}/purge")
+async def purge_job(job_id: str) -> dict:
+    """Delete a job and remove its VOD artifacts."""
+    from streamcraft.jobs.storage import delete_job as delete_job_storage
+    from streamcraft.jobs.storage import get_job as get_job_storage
+    from streamcraft.core.pipeline import resolve_output_dirs
+
+    job = get_job_storage(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    out_root = Path("out")
+    dataset_root = Path("dataset")
+    _, vod_dir, dataset_dir = resolve_output_dirs(job.vodUrl, out_root, dataset_root)
+
+    removed: list[str] = []
+    if vod_dir.exists():
+        shutil.rmtree(vod_dir, ignore_errors=True)
+        removed.append(to_workspace_relative(vod_dir))
+
+    vod_slug = vod_dir.name
+    segment_manifest = dataset_dir / f"{vod_slug}_segments.json"
+    review_manifest = dataset_dir / f"{vod_slug}_segment_review.json"
+    for path in (segment_manifest, review_manifest):
+        if path.exists():
+            try:
+                path.unlink()
+                removed.append(to_workspace_relative(path))
+            except Exception:
+                pass
+
+    delete_job_storage(job_id)
+    return {"status": "deleted", "removed": removed}
 
 
 def resolve_artifact_path(path_value: str) -> Path:

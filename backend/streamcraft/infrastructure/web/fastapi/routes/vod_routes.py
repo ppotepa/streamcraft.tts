@@ -23,12 +23,23 @@ class FetchVodMetadataRequest(BaseModel):
 class FetchVodMetadataResponse(BaseModel):
     """Response model for fetched VOD metadata."""
 
-    vod_id: str
+    vodId: str
     streamer: str
     title: str
-    duration_seconds: float
-    preview_url: str | None
+    durationSeconds: float
+    previewUrl: str | None
     platform: str
+    description: str | None = None
+    url: str | None = None
+    viewCount: int | None = None
+    createdAt: str | None = None
+    publishedAt: str | None = None
+    language: str | None = None
+    userId: str | None = None
+    userLogin: str | None = None
+    videoType: str | None = None
+    gameId: str | None = None
+    gameName: str | None = None
 
 
 @router.post("/metadata", response_model=FetchVodMetadataResponse)
@@ -52,10 +63,21 @@ def fetch_vod_metadata(
     dto = result.unwrap()
 
     return FetchVodMetadataResponse(
-        vod_id=dto.vod_id,
+        vodId=dto.vod_id,
         streamer=dto.streamer,
         title=dto.title,
-        duration_seconds=dto.duration_seconds,
-        preview_url=dto.preview_url,
+        durationSeconds=dto.duration_seconds,
+        previewUrl=dto.preview_url,
         platform=dto.platform,
+        description=dto.description,
+        url=dto.url,
+        viewCount=dto.view_count,
+        createdAt=dto.created_at,
+        publishedAt=dto.published_at,
+        language=dto.language,
+        userId=dto.user_id,
+        userLogin=dto.user_login,
+        videoType=dto.video_type,
+        gameId=dto.game_id,
+        gameName=dto.game_name,
     )

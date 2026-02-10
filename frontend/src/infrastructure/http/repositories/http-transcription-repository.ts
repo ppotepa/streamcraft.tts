@@ -2,10 +2,16 @@
  * HTTP Transcription Repository Adapter
  */
 
-import { Result } from '../../../domain/shared/result';
-import { Transcript } from '../../../domain/transcription/entities/transcript.entity';
-import { Cue } from '../../../domain/transcription/entities/cue.entity';
-import { TranscriptionId } from '../../../domain/transcription/value-objects/transcription-id';
+import { Result, Ok, Err } from '../../../domain/shared';
+import type { Transcript } from '../../../domain/transcription/entities/transcript.entity';
+import type { Cue } from '../../../domain/transcription/entities/cue.entity';
+import { createTranscript } from '../../../domain/transcription/entities/transcript.entity';
+import { createCue } from '../../../domain/transcription/entities/cue.entity';
+import { TranscriptId, CueId } from '../../../domain/shared/branded-types';
+import { LanguageCode } from '../../../domain/transcription/value-objects/language-code';
+import { TranscriptText } from '../../../domain/transcription/value-objects/transcript-text';
+import { ConfidenceScore } from '../../../domain/transcription/value-objects/confidence-score';
+import { TimeRange } from '../../../domain/audio/value-objects/time-range';
 import { TranscriptionRepository } from '../../../domain/transcription/ports/transcription-repository';
 import { TranscriptionNotFoundError } from '../../../domain/transcription/errors/transcription-errors';
 import { HttpClient } from '../client/http-client';
@@ -37,18 +43,18 @@ export class HttpTranscriptionRepository implements TranscriptionRepository {
                 `/transcriptions/${id}`
             );
 
-            if (response.isFailure()) {
-                return Result.fail(
+            if (!response.ok) {
+                return Err(
                     new TranscriptionNotFoundError(`Transcription ${id} not found`)
                 );
             }
 
-            const dto = response.value;
+            const dto = response.value.data;
             const transcript = this.mapDtoToEntity(dto);
 
-            return Result.ok(transcript);
+            return Ok(transcript);
         } catch (error) {
-            return Result.fail(
+            return Err(
                 new TranscriptionNotFoundError(
                     `Failed to fetch transcription ${id}: ${error}`
                 )
@@ -64,13 +70,13 @@ export class HttpTranscriptionRepository implements TranscriptionRepository {
                 dto
             );
 
-            if (response.isFailure()) {
-                return Result.fail(new Error('Failed to save transcription'));
+            if (!response.ok) {
+                return Err(new Error('Failed to save transcription'));
             }
 
-            return Result.ok(undefined);
+            return Ok(undefined);
         } catch (error) {
-            return Result.fail(new Error(`Failed to save transcription: ${error}`));
+            return Err(new Error(`Failed to save transcription: ${error}`));
         }
     }
 
@@ -80,53 +86,58 @@ export class HttpTranscriptionRepository implements TranscriptionRepository {
                 `/transcriptions/${id}`
             );
 
-            if (response.isFailure()) {
-                return Result.fail(new Error('Failed to delete transcription'));
+            if (!response.ok) {
+                return Err(new Error('Failed to delete transcription'));
             }
 
-            return Result.ok(undefined);
+            return Ok(undefined);
         } catch (error) {
-            return Result.fail(
+            return Err(
                 new Error(`Failed to delete transcription: ${error}`)
             );
         }
     }
 
     private mapDtoToEntity(dto: TranscriptDto): Transcript {
-        const cues = dto.cues.map(
-            (cueDto) =>
-                new Cue(
+        const cues = dto.cues.map((cueDto, index) =>
+            createCue({
+                id: `${dto.transcriptionId}-${index}` as CueId,
+                timeRange: TimeRange.create(
                     cueDto.startTimeSeconds,
-                    cueDto.endTimeSeconds,
-                    cueDto.text,
-                    cueDto.confidence
-                )
+                    cueDto.endTimeSeconds
+                ),
+                text: TranscriptText.create(cueDto.text),
+                confidence:
+                    cueDto.confidence !== null
+                        ? ConfidenceScore.create(cueDto.confidence)
+                        : undefined,
+            })
         );
 
-        return new Transcript(
-            dto.transcriptionId,
-            dto.audioPath,
+        const language = dto.language
+            ? LanguageCode.create(dto.language)
+            : LanguageCode.english();
+
+        return createTranscript({
+            id: dto.transcriptionId as TranscriptId,
             cues,
-            dto.language,
-            new Date(dto.createdAt)
-        );
+            language,
+        });
     }
 
     private mapEntityToDto(transcript: Transcript): TranscriptDto {
-        const cues = transcript.getCues();
-
         return {
-            transcriptionId: transcript.getId(),
-            audioPath: transcript.getAudioPath(),
-            cues: cues.map((cue) => ({
-                startTimeSeconds: cue.getStartTime(),
-                endTimeSeconds: cue.getEndTime(),
-                text: cue.getText(),
-                confidence: cue.getConfidence(),
+            transcriptionId: transcript.id,
+            audioPath: '',
+            cues: transcript.cues.map((cue) => ({
+                startTimeSeconds: cue.timeRange.start,
+                endTimeSeconds: cue.timeRange.end,
+                text: cue.text.value,
+                confidence: cue.confidence?.value ?? null,
             })),
-            totalCues: cues.length,
-            language: transcript.getLanguage(),
-            createdAt: transcript.getCreatedAt().toISOString(),
+            totalCues: transcript.cues.length,
+            language: transcript.language.code,
+            createdAt: new Date().toISOString(),
         };
     }
 }

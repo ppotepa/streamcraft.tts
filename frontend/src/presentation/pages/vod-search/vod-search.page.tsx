@@ -8,6 +8,7 @@ import { VodSearch, VodMetadataCard } from '../../features/vod-management';
 import { useDependencies } from '../../context/dependency-context';
 import { useFetchVodMetadata } from '../../shared/hooks/use-fetch-vod-metadata';
 import { useCreateJob } from '../../shared/hooks/use-create-job';
+import { parseVodUrl } from '../../../domain/vod/utils/parse-vod-url';
 
 export const VodSearchPage: React.FC = () => {
     const container = useDependencies();
@@ -37,9 +38,15 @@ export const VodSearchPage: React.FC = () => {
         resetMetadata();
         resetJob();
 
-        // Parse platform from URL
-        const platform = url.includes('twitch.tv') ? 'twitch' : 'youtube';
-        await fetchMetadata(url, platform as any);
+        // Parse VOD URL to extract ID and platform
+        const parsed = parseVodUrl(url);
+        if (!parsed) {
+            // TODO: Show error toast
+            console.error('Invalid VOD URL');
+            return;
+        }
+
+        await fetchMetadata(parsed.vodId, parsed.platform);
     };
 
     const handleCreateJob = async (vodId: string): Promise<void> => {
@@ -88,6 +95,15 @@ export const VodSearchPage: React.FC = () => {
                             durationSeconds={metadata.durationSeconds}
                             previewUrl={metadata.previewUrl}
                             platform={metadata.platform}
+                            description={metadata.description}
+                            url={metadata.url}
+                            viewCount={metadata.viewCount}
+                            createdAt={metadata.createdAt}
+                            publishedAt={metadata.publishedAt}
+                            language={metadata.language}
+                            userLogin={metadata.userLogin}
+                            videoType={metadata.videoType}
+                            gameName={metadata.gameName}
                             onCreateJob={handleCreateJob}
                         />
                     </div>

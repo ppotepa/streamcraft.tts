@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from streamcraft.domain.common.result import Result
+from streamcraft.domain.shared.branded_types import VodId
 from streamcraft.domain.vod.errors import VodDownloadFailedError
-from streamcraft.domain.vod.value_objects.platform import Platform
-from streamcraft.domain.vod.value_objects.vod_id import VodId
+from streamcraft.domain.vod.value_objects import Platform
 
 
 class VodDownloader(ABC):

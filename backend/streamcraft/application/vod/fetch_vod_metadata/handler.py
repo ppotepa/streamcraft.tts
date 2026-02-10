@@ -37,6 +37,17 @@ class FetchVodMetadataHandler(
             duration_seconds=metadata.duration.seconds,
             preview_url=metadata.preview_url,
             platform=metadata.platform.value,
+            description=metadata.description,
+            url=metadata.url,
+            view_count=metadata.view_count,
+            created_at=metadata.created_at,
+            published_at=metadata.published_at,
+            language=metadata.language,
+            user_id=metadata.user_id,
+            user_login=metadata.user_login,
+            video_type=metadata.video_type,
+            game_id=metadata.game_id,
+            game_name=metadata.game_name,
         )
 
         return Success(value=dto)

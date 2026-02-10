@@ -2,7 +2,15 @@
  * Transcription domain errors.
  */
 
-import { DomainError, ValidationError } from '@domain/shared/errors';
+import { DomainError, ValidationError } from '../../shared/errors';
+
+export class TranscriptionNotFoundError extends DomainError {
+    readonly code = 'TRANSCRIPTION_NOT_FOUND';
+
+    constructor(message: string) {
+        super(message);
+    }
+}
 
 export class TranscriptionFailedError extends DomainError {
     readonly code = 'TRANSCRIPTION_FAILED';

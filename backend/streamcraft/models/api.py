@@ -61,6 +61,7 @@ class SegmentPreview(BaseModel):
 class RunSanitizeRequest(BaseModel):
     """Audio sanitization request."""
     vodUrl: str
+    jobId: Optional[str] = None
     outdir: str = "out"
     datasetOut: str = "dataset"
     auto: bool = True
@@ -113,6 +114,7 @@ class SegmentReviewVote(BaseModel):
     index: int
     decision: Literal["accept", "reject"]
     segment: SegmentPreview
+    note: Optional[str] = None
 
 
 class SaveSegmentReviewRequest(BaseModel):
@@ -163,6 +165,35 @@ class ExportClipsResponse(BaseModel):
     sampleRate: int
     count: int
     items: List[ExportClipItem]
+
+
+class SegmentManifestItem(BaseModel):
+    index: int
+    start: float
+    end: float
+    duration: float
+    cleanStart: Optional[float] = None
+    cleanEnd: Optional[float] = None
+    kept: Optional[bool] = None
+    quality: Optional[int] = None
+    speechRatio: Optional[float] = None
+    snrDb: Optional[float] = None
+    clipRatio: Optional[float] = None
+    sfxScore: Optional[float] = None
+    speakerSim: Optional[float] = None
+    labels: List[str] = []
+    rejectReason: List[str] = []
+
+
+class SegmentManifestResponse(BaseModel):
+    sampleRate: int
+    cleanPath: Optional[str] = None
+    originalPath: Optional[str] = None
+    segments: List[SegmentManifestItem]
+    total: Optional[int] = None
+    offset: Optional[int] = None
+    limit: Optional[int] = None
+    hasMore: Optional[bool] = None
 
 
 class RunSrtRequest(BaseModel):
@@ -254,7 +285,30 @@ class JobResponse(BaseModel):
     outputs: Optional[JobOutputs] = None
 
 
+class CreateJobRequest(BaseModel):
+    """Create job request (legacy wizard)."""
+    vodUrl: str
+    streamer: Optional[str] = None
+    title: Optional[str] = None
+
+
 class UpdateJobRequest(BaseModel):
     """Update job request."""
     steps: Optional[JobSteps] = None
     outputs: Optional[JobOutputs] = None
+
+
+class TranscribeSegmentRequest(BaseModel):
+    """Request to transcribe a single audio segment."""
+    vodUrl: str
+    segmentIndex: int
+    outdir: str = "out"
+    datasetOut: str = "dataset"
+
+
+class TranscribeSegmentWord(BaseModel):
+    """Individual word in transcription."""
+    word: str
+    start: float
+    end: float
+    probability: float

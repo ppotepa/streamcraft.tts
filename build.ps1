@@ -25,7 +25,7 @@ if (-not $SkipBackend) {
 
 # UI setup
 if (-not $SkipUi) {
-    $uiPath = Join-Path $root "ui\react"
+    $uiPath = Join-Path $root "frontend"
     if (Test-Path $uiPath) {
         Write-Host "`n[Frontend] Installing Node dependencies..." -ForegroundColor Yellow
         Push-Location $uiPath
@@ -42,5 +42,5 @@ if (-not $SkipUi) {
     }
 }
 
-Write-Host "`n✓ Build complete!" -ForegroundColor Green
+Write-Host "`nBuild complete!" -ForegroundColor Green
 Write-Host "  Run with: .\run.ps1 (production) or .\run_dev.ps1 (development)" -ForegroundColor Cyan

@@ -5,7 +5,7 @@
 import { Err, Ok, Result } from '../../../domain/shared/result';
 import { HttpClient, HttpError, HttpResponse, RequestConfig } from './http-client';
 
-export class FetchHttpClient implements HttpClient {
+export class FetchClient implements HttpClient {
     constructor(private readonly baseUrl: string = '') { }
 
     async get<T>(

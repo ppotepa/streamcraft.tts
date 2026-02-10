@@ -4,10 +4,9 @@ import subprocess
 from pathlib import Path
 
 from streamcraft.domain.common.result import Err, Ok, Result
+from streamcraft.domain.vod import Platform, VodId
 from streamcraft.domain.vod.errors import VodDownloadFailedError
 from streamcraft.domain.vod.ports import VodDownloader
-from streamcraft.domain.vod.value_objects.platform import Platform
-from streamcraft.domain.vod.value_objects.vod_id import VodId
 
 
 class YouTubeVodDownloader(VodDownloader):

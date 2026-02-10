@@ -21,6 +21,20 @@ class TwitchApiClient(VodMetadataFetcher):
     def fetch(self, vod_id: VodId) -> Result[VodMetadata, MetadataFetchFailedError]:
         """Fetch VOD metadata from Twitch API."""
         try:
+            if not self._client_id or not self._client_secret:
+                return Failure(
+                    error=MetadataFetchFailedError(
+                        vod_id=vod_id, reason="Twitch credentials are not configured"
+                    )
+                )
+
+            if "NOT_SET" in self._client_id or "NOT_SET" in self._client_secret:
+                return Failure(
+                    error=MetadataFetchFailedError(
+                        vod_id=vod_id, reason="Twitch credentials are not configured"
+                    )
+                )
+
             # Ensure we have access token
             if not self._access_token:
                 token_result = self._get_access_token()
@@ -62,12 +76,36 @@ class TwitchApiClient(VodMetadataFetcher):
             duration_seconds = self._parse_duration(duration_str)
 
             # Create metadata
+            preview_url = video.get("thumbnail_url")
+            if preview_url:
+                preview_url = (
+                    preview_url
+                    .replace("{width}", "640")
+                    .replace("{height}", "360")
+                    .replace("%{width}", "640")
+                    .replace("%{height}", "360")
+                )
+
+            game_id = video.get("game_id") or None
+            game_name = self._get_game_name(game_id, headers) if game_id else None
+
             metadata = VodMetadata(
                 streamer=video["user_name"],
                 title=video["title"],
                 duration=Duration(seconds=duration_seconds),
-                preview_url=video.get("thumbnail_url"),
+                preview_url=preview_url,
                 platform=Platform.TWITCH,
+                description=video.get("description") or None,
+                url=video.get("url") or None,
+                view_count=video.get("view_count"),
+                created_at=video.get("created_at") or None,
+                published_at=video.get("published_at") or None,
+                language=video.get("language") or None,
+                user_id=video.get("user_id") or None,
+                user_login=video.get("user_login") or None,
+                video_type=video.get("type") or None,
+                game_id=game_id,
+                game_name=game_name,
             )
 
             return Success(value=metadata)
@@ -115,6 +153,29 @@ class TwitchApiClient(VodMetadataFetcher):
                     vod_id=create_vod_id("unknown"), reason=f"Token fetch failed: {e}"
                 )
             )
+
+    def _get_game_name(self, game_id: str, headers: dict) -> str | None:
+        """Fetch game name from Twitch by game id."""
+        try:
+            import requests
+
+            response = requests.get(
+                "https://api.twitch.tv/helix/games",
+                params={"id": game_id},
+                headers=headers,
+                timeout=10,
+            )
+
+            if response.status_code != 200:
+                return None
+
+            data = response.json()
+            if not data.get("data"):
+                return None
+
+            return data["data"][0].get("name")
+        except Exception:
+            return None
 
     def _parse_duration(self, duration_str: str) -> float:
         """Parse Twitch duration string (e.g., '1h2m3s') to seconds."""

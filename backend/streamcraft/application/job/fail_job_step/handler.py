@@ -3,8 +3,7 @@
 from streamcraft.application.job.fail_job_step.command import FailJobStepCommand
 from streamcraft.application.job.fail_job_step.dto import FailJobStepDto
 from streamcraft.domain.common.result import Err, Ok, Result
-from streamcraft.domain.job import JobNotFoundError
-from streamcraft.domain.job.repository import JobRepository
+from streamcraft.domain.job import JobNotFoundError, JobRepository
 
 
 class FailJobStepHandler:

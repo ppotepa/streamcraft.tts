@@ -9,5 +9,5 @@ export * from './dataset-builder/dataset-builder.page';
 export * from './transcription-editor/transcription-editor.page';
 export * from './audio-processing/audio-processing.page';
 export * from './settings/settings.page';
-export * from './audio-processing/audio-processing.page';
-export * from './settings/settings.page';
+export * from './wizard/wizard.page';
+export * from './manual-review/manual-review.page';

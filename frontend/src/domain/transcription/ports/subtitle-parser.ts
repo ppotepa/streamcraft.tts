@@ -2,7 +2,7 @@
  * Subtitle parser port.
  */
 
-import { Result } from '@domain/shared/result';
+import { Result } from '../../shared/result';
 import { Transcript } from '../entities/transcript.entity';
 import { InvalidSubtitleFormatError } from '../errors/transcription-errors';
 

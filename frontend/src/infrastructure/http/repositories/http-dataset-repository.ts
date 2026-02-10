@@ -2,10 +2,13 @@
  * HTTP Dataset Repository Adapter
  */
 
-import { Result } from '../../../domain/shared/result';
-import { Dataset } from '../../../domain/dataset/entities/dataset.entity';
-import { DatasetEntry } from '../../../domain/dataset/entities/dataset-entry.entity';
-import { DatasetId } from '../../../domain/dataset/value-objects/dataset-id';
+import { Result, Ok, Err } from '../../../domain/shared';
+import type { Dataset } from '../../../domain/dataset/entities/dataset.entity';
+import { createDataset } from '../../../domain/dataset/entities/dataset.entity';
+import { createDatasetEntry } from '../../../domain/dataset/entities/dataset-entry.entity';
+import { DatasetFormat } from '../../../domain/dataset/value-objects/dataset-format';
+import { EntryPath } from '../../../domain/dataset/value-objects/entry-path';
+import { DatasetId, EntryId, SegmentId } from '../../../domain/shared/branded-types';
 import { DatasetRepository } from '../../../domain/dataset/ports/dataset-repository';
 import { DatasetNotFoundError } from '../../../domain/dataset/errors/dataset-errors';
 import { HttpClient } from '../client/http-client';
@@ -35,18 +38,18 @@ export class HttpDatasetRepository implements DatasetRepository {
                 `/datasets/${id}`
             );
 
-            if (response.isFailure()) {
-                return Result.fail(
+            if (!response.ok) {
+                return Err(
                     new DatasetNotFoundError(`Dataset ${id} not found`)
                 );
             }
 
-            const dto = response.value;
+            const dto = response.value.data;
             const dataset = this.mapDtoToEntity(dto);
 
-            return Result.ok(dataset);
+            return Ok(dataset);
         } catch (error) {
-            return Result.fail(
+            return Err(
                 new DatasetNotFoundError(`Failed to fetch dataset ${id}: ${error}`)
             );
         }
@@ -59,17 +62,17 @@ export class HttpDatasetRepository implements DatasetRepository {
                 totalCount: number;
             }>('/datasets');
 
-            if (response.isFailure()) {
-                return Result.fail(new Error('Failed to fetch datasets'));
+            if (!response.ok) {
+                return Err(new Error('Failed to fetch datasets'));
             }
 
-            const datasets = response.value.datasets.map((dto) =>
+            const datasets = response.value.data.datasets.map((dto) =>
                 this.mapDtoToEntity(dto)
             );
 
-            return Result.ok(datasets);
+            return Ok(datasets);
         } catch (error) {
-            return Result.fail(new Error(`Failed to fetch datasets: ${error}`));
+            return Err(new Error(`Failed to fetch datasets: ${error}`));
         }
     }
 
@@ -78,13 +81,13 @@ export class HttpDatasetRepository implements DatasetRepository {
             const dto = this.mapEntityToDto(dataset);
             const response = await this.httpClient.post<void>('/datasets', dto);
 
-            if (response.isFailure()) {
-                return Result.fail(new Error('Failed to save dataset'));
+            if (!response.ok) {
+                return Err(new Error('Failed to save dataset'));
             }
 
-            return Result.ok(undefined);
+            return Ok(undefined);
         } catch (error) {
-            return Result.fail(new Error(`Failed to save dataset: ${error}`));
+            return Err(new Error(`Failed to save dataset: ${error}`));
         }
     }
 
@@ -92,47 +95,46 @@ export class HttpDatasetRepository implements DatasetRepository {
         try {
             const response = await this.httpClient.delete<void>(`/datasets/${id}`);
 
-            if (response.isFailure()) {
-                return Result.fail(new Error('Failed to delete dataset'));
+            if (!response.ok) {
+                return Err(new Error('Failed to delete dataset'));
             }
 
-            return Result.ok(undefined);
+            return Ok(undefined);
         } catch (error) {
-            return Result.fail(new Error(`Failed to delete dataset: ${error}`));
+            return Err(new Error(`Failed to delete dataset: ${error}`));
         }
     }
 
     private mapDtoToEntity(dto: DatasetDto): Dataset {
-        const entries = dto.entries.map(
-            (entryDto) =>
-                new DatasetEntry(
-                    entryDto.audioPath,
-                    entryDto.text,
-                    entryDto.durationSeconds
-                )
+        const entries = dto.entries.map((entryDto, index) =>
+            createDatasetEntry({
+                id: `${dto.datasetId}-entry-${index}` as EntryId,
+                segmentId: `${dto.datasetId}-seg-${index}` as SegmentId,
+                audioPath: EntryPath.create(entryDto.audioPath),
+                text: entryDto.text,
+                durationSeconds: entryDto.durationSeconds ?? 0,
+            })
         );
 
-        return new Dataset(
-            dto.datasetId,
-            dto.name,
+        return createDataset({
+            id: dto.datasetId as DatasetId,
+            name: dto.name,
             entries,
-            new Date(dto.createdAt)
-        );
+            format: DatasetFormat.JSON,
+        });
     }
 
     private mapEntityToDto(dataset: Dataset): DatasetDto {
-        const entries = dataset.getEntries();
-
         return {
-            datasetId: dataset.getId(),
-            name: dataset.getName(),
-            entries: entries.map((entry) => ({
-                audioPath: entry.getAudioPath(),
-                text: entry.getText(),
-                durationSeconds: entry.getDurationSeconds(),
+            datasetId: dataset.id,
+            name: dataset.name,
+            entries: dataset.entries.map((entry) => ({
+                audioPath: entry.audioPath.path,
+                text: entry.text,
+                durationSeconds: entry.durationSeconds,
             })),
-            totalEntries: entries.length,
-            createdAt: dataset.getCreatedAt().toISOString(),
+            totalEntries: dataset.entries.length,
+            createdAt: new Date().toISOString(),
         };
     }
 }

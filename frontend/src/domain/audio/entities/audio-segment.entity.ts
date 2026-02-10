@@ -2,7 +2,7 @@
  * Audio segment entity.
  */
 
-import { SegmentId } from '@domain/shared/branded-types';
+import { SegmentId } from '../../shared/branded-types';
 import { RmsDb } from '../value-objects/rms-db';
 import { TimeRange } from '../value-objects/time-range';
 

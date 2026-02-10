@@ -7,8 +7,7 @@ from streamcraft.application.transcription.filter_transcript_cues.dto import (
     FilterTranscriptCuesDto,
 )
 from streamcraft.domain.common.result import Err, Ok, Result
-from streamcraft.domain.transcription import TranscriptionNotFoundError
-from streamcraft.domain.transcription.repository import TranscriptionRepository
+from streamcraft.domain.transcription import TranscriptionNotFoundError, TranscriptionRepository
 
 
 class FilterTranscriptCuesHandler:

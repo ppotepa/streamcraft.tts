@@ -2,7 +2,7 @@
  * Audio quality analyzer port.
  */
 
-import { Result } from '@domain/shared/result';
+import { Result } from '../../shared/result';
 import { RmsDb } from '../value-objects/rms-db';
 
 export interface AudioQualityAnalyzer {

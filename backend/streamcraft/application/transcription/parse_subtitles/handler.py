@@ -8,7 +8,7 @@ from streamcraft.application.transcription.parse_subtitles.dto import (
 from streamcraft.domain.common.result import Err, Ok, Result
 from streamcraft.domain.transcription.entities.transcript import Transcript
 from streamcraft.domain.transcription.ports.subtitle_parser import SubtitleParser
-from streamcraft.domain.transcription.repository import TranscriptionRepository
+from streamcraft.domain.transcription import TranscriptionRepository
 
 
 class ParseSubtitlesHandler:

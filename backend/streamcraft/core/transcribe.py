@@ -234,12 +234,18 @@ def download_vod(
 def extract_audio(input_media: Path, out_dir: Path, force: bool = False) -> Tuple[Path, Path]:
     """Produce a high-quality (48 kHz stereo) WAV used for both slicing and transcription."""
 
+    input_media = input_media.resolve()
+    out_dir = out_dir.resolve()
     base = input_media.stem
-    full_path = out_dir / f"{base}_full.wav"
+    full_path = (out_dir / f"{base}_full.wav").resolve()
 
     if force or not full_path.exists():
+        if not input_media.exists():
+            raise FileNotFoundError(f"Input media not found: {input_media}")
+        ensure_ffmpeg()
+        ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
         cmd_full = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-y",
             "-i",
             str(input_media),
@@ -253,7 +259,17 @@ def extract_audio(input_media: Path, out_dir: Path, force: bool = False) -> Tupl
             str(full_path),
         ]
         log(f"Extracting high-quality audio: {' '.join(cmd_full)}")
-        subprocess.run(cmd_full, check=True)
+        try:
+            result = subprocess.run(cmd_full, capture_output=True, text=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"ffmpeg invocation failed: {exc} | input={input_media} output={full_path}"
+            ) from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"ffmpeg failed (code {result.returncode}): {detail or 'no output'} | input={input_media} output={full_path}"
+            )
     else:
         log(f"[i] Reusing high-quality audio {full_path}")
 

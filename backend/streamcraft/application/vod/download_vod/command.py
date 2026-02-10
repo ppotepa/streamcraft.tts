@@ -3,8 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from streamcraft.domain.vod.value_objects.platform import Platform
-from streamcraft.domain.vod.value_objects.vod_id import VodId
+from streamcraft.domain.vod import Platform, VodId
 
 
 @dataclass(frozen=True)

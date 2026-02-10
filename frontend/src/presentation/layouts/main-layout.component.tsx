@@ -13,31 +13,38 @@ export const MainLayout = () => {
     };
 
     const linkClass = (path: string): string => {
-        const base = 'px-4 py-2 rounded-md text-sm font-medium transition-colors';
+        const base = 'px-4 py-2 rounded-lg text-sm font-medium transition-colors';
         if (isActive(path)) {
-            return `${base} bg-blue-600 text-white`;
+            return `${base} bg-white/10 text-white border border-white/10`;
         }
-        return `${base} text-gray-700 hover:bg-gray-100 hover:text-gray-900`;
+        return `${base} text-slate-300 hover:bg-white/5 hover:text-white border border-transparent`;
     };
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="app-shell">
             {/* Navigation Header */}
-            <header className="bg-white shadow-sm">
+            <header className="sticky top-0 z-20 bg-black/40 backdrop-blur border-b border-white/10">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center h-16">
+                    <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
                         {/* Logo/Title */}
-                        <div className="flex items-center">
-                            <h1 className="text-xl font-bold text-gray-900">StreamCraft TTS</h1>
+                        <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-400 to-blue-400"></div>
+                            <div>
+                                <h1 className="text-lg font-semibold text-white">StreamCraft TTS</h1>
+                                <p className="text-xs text-slate-400">VOD to TTS Dataset Studio</p>
+                            </div>
                         </div>
 
                         {/* Navigation Links */}
-                        <nav className="flex space-x-2">
+                        <nav className="flex flex-wrap gap-2">
+                            <Link to="/wizard" className={linkClass('/wizard')}>
+                                Wizard
+                            </Link>
+                            <Link to="/review" className={linkClass('/review')}>
+                                Review
+                            </Link>
                             <Link to="/jobs" className={linkClass('/jobs')}>
                                 Jobs
-                            </Link>
-                            <Link to="/vods" className={linkClass('/vods')}>
-                                VODs
                             </Link>
                             <Link to="/datasets" className={linkClass('/datasets')}>
                                 Datasets
@@ -59,9 +66,9 @@ export const MainLayout = () => {
             </main>
 
             {/* Footer */}
-            <footer className="bg-white border-t border-gray-200 mt-auto">
+            <footer className="border-t border-white/10 mt-auto">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                    <p className="text-center text-sm text-gray-500">
+                    <p className="text-center text-xs text-slate-500">
                         StreamCraft TTS - VOD to TTS Dataset Pipeline
                     </p>
                 </div>

@@ -17,6 +17,7 @@ from streamcraft.infrastructure.web.fastapi.dependencies import (
     get_parse_subtitles_handler,
     get_filter_transcript_cues_handler,
 )
+from streamcraft.models.api import TranscribeSegmentRequest
 
 
 router = APIRouter(prefix="/transcriptions", tags=["transcriptions"])
@@ -67,6 +68,14 @@ async def transcribe_audio(
         raise HTTPException(status_code=400, detail=str(result.unwrap_error()))
 
     return result.unwrap()
+
+
+@router.post("/transcribe-segment")
+async def transcribe_segment(request: TranscribeSegmentRequest):
+    """Transcribe a single segment with word-level timestamps, streaming NDJSON."""
+    from streamcraft.api import routes as legacy_routes
+
+    return await legacy_routes.transcribe_segment(request)
 
 
 @router.get("/{transcription_id}")

@@ -32,9 +32,16 @@ class Settings(BaseSettings):
     clip_aac_bitrate: int = 320
     use_demucs: bool = False
     
+    # External API credentials
+    twitch_client_id: str = ""
+    twitch_client_secret: str = ""
+    youtube_api_key: str = ""
+    
     class Config:
         env_prefix = "STREAMCRAFT_"
         case_sensitive = False
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 _settings: Optional[Settings] = None

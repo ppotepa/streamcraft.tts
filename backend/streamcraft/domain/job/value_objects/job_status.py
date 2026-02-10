@@ -25,9 +25,9 @@ class IdleStatus:
 class RunningStatus:
     """Job is currently running."""
 
-    kind: Literal[JobStatusKind.RUNNING] = JobStatusKind.RUNNING
     current_step: str
     progress: float  # 0.0 to 1.0
+    kind: Literal[JobStatusKind.RUNNING] = JobStatusKind.RUNNING
 
     def __post_init__(self) -> None:
         """Validate progress."""
@@ -39,17 +39,17 @@ class RunningStatus:
 class DoneStatus:
     """Job completed successfully."""
 
-    kind: Literal[JobStatusKind.DONE] = JobStatusKind.DONE
     exit_code: int
+    kind: Literal[JobStatusKind.DONE] = JobStatusKind.DONE
 
 
 @dataclass(frozen=True, slots=True)
 class ErrorStatus:
     """Job failed with an error."""
 
-    kind: Literal[JobStatusKind.ERROR] = JobStatusKind.ERROR
     message: str
     exit_code: int
+    kind: Literal[JobStatusKind.ERROR] = JobStatusKind.ERROR
 
 
 JobStatus = IdleStatus | RunningStatus | DoneStatus | ErrorStatus

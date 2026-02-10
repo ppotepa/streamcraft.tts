@@ -1,0 +1,2069 @@
+[
+  {
+    "id": "4d3143dd-9706-4c66-a2fc-ff7d77024e8f",
+    "vod_id": "2689875280",
+    "vod_url": "https://www.twitch.tv/videos/2689875280",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-09T23:34:36.140809",
+    "updated_at": "2026-02-09T23:34:36.140809"
+  },
+  {
+    "id": "8835e35d-c920-41f5-9542-044ac3b11076",
+    "vod_id": "2689875280",
+    "vod_url": "https://www.twitch.tv/videos/2689875280",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T02:23:12.955262",
+    "updated_at": "2026-02-10T02:23:12.955262"
+  },
+  {
+    "id": "d111b079-91d1-420b-9d30-267df448326f",
+    "vod_id": "2689875280",
+    "vod_url": "https://www.twitch.tv/videos/2689875280",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T02:23:16.272253",
+    "updated_at": "2026-02-10T02:23:16.272253"
+  },
+  {
+    "id": "3592018a-21bc-4235-b675-a5e2d0512dcc",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T03:54:44.996012",
+    "updated_at": "2026-02-10T03:54:44.996012"
+  },
+  {
+    "id": "afbc18fe-ea6a-441f-91c2-b3cfadfc8250",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:15:55.146581",
+    "updated_at": "2026-02-10T04:15:55.146581"
+  },
+  {
+    "id": "3d9eacb2-b036-4ffe-8fea-3539a2344e97",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:18:28.436834",
+    "updated_at": "2026-02-10T04:18:28.436834"
+  },
+  {
+    "id": "863d8ff1-8e41-46ba-aea9-40e3a97a3b84",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:19:20.767917",
+    "updated_at": "2026-02-10T04:19:20.767917"
+  },
+  {
+    "id": "52e647be-c18f-484d-9a8a-c9ec17bb21d1",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:19:27.868529",
+    "updated_at": "2026-02-10T04:19:27.868529"
+  },
+  {
+    "id": "84724622-6743-4815-b148-323df8263475",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:19:46.558544",
+    "updated_at": "2026-02-10T04:19:46.558544"
+  },
+  {
+    "id": "98d1a354-f846-455d-864c-d5fbd749f42e",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:24:03.413706",
+    "updated_at": "2026-02-10T04:24:03.413706"
+  },
+  {
+    "id": "0654c03f-677f-43b5-8537-175d4dd44cb2",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:33:16.069604",
+    "updated_at": "2026-02-10T04:33:16.069604"
+  },
+  {
+    "id": "7d8fb9f1-87c0-41cf-afd2-1eac802ef139",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:35:55.423348",
+    "updated_at": "2026-02-10T04:35:55.423348"
+  },
+  {
+    "id": "7420bb18-fbae-4158-a116-3262392f95e6",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:40:55.483217",
+    "updated_at": "2026-02-10T04:40:55.483217"
+  },
+  {
+    "id": "e71452dc-72fc-44aa-bc57-a72963ba06ba",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:41:38.293643",
+    "updated_at": "2026-02-10T04:41:38.293643"
+  },
+  {
+    "id": "2452c713-f7fb-446d-8a7a-c491e93a4cfc",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:48:54.599990",
+    "updated_at": "2026-02-10T04:48:54.599990"
+  },
+  {
+    "id": "ddbe0564-de23-4286-8dbe-c8f97d25200b",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T04:59:25.031320",
+    "updated_at": "2026-02-10T04:59:25.031320"
+  },
+  {
+    "id": "a755fdbd-63ad-4fe2-ba11-f4f069215f2b",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T05:01:55.107866",
+    "updated_at": "2026-02-10T05:01:55.107866"
+  },
+  {
+    "id": "6858d375-5201-4f43-881b-069d48a09c97",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T05:02:05.894127",
+    "updated_at": "2026-02-10T05:02:05.894127"
+  },
+  {
+    "id": "9ab4606e-e6cd-4e1e-80ae-a9f2c3b31605",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T05:03:13.092835",
+    "updated_at": "2026-02-10T05:03:13.092835"
+  },
+  {
+    "id": "de11c9bf-ecec-426a-a9e2-b83d5dc0204a",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T05:06:18.145934",
+    "updated_at": "2026-02-10T05:06:18.145934"
+  },
+  {
+    "id": "fb9fa3c1-7624-40c6-be84-3b1f5233a243",
+    "vod_id": "2453173157",
+    "vod_url": "https://www.twitch.tv/videos/2453173157",
+    "status": {
+      "kind": "idle"
+    },
+    "steps": [
+      {
+        "name": "fetch_metadata",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "download_vod",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "extract_audio",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "transcribe",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "parse_subtitles",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "slice_segments",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "analyze_quality",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "create_dataset",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      },
+      {
+        "name": "export",
+        "status": {
+          "kind": "idle"
+        },
+        "started_at": null,
+        "completed_at": null,
+        "log_messages": []
+      }
+    ],
+    "created_at": "2026-02-10T05:07:18.541719",
+    "updated_at": "2026-02-10T05:07:18.541719"
+  },
+  {
+    "id": "job-23-1770727926",
+    "vodUrl": "https://www.twitch.tv/videos/2690963552",
+    "streamer": "JuggernautJason",
+    "title": "WoW Day | Not feeling well",
+    "createdAt": "2026-02-10T13:52:06.406069",
+    "updatedAt": "2026-02-10T13:52:06.406069",
+    "steps": {
+      "vod": true,
+      "audio": false,
+      "sanitize": false,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {}
+  },
+  {
+    "id": "job-24-1770737861",
+    "vodUrl": "https://www.twitch.tv/videos/2690963552",
+    "streamer": "JuggernautJason",
+    "title": "WoW Day | Not feeling well",
+    "createdAt": "2026-02-10T16:37:41.427844",
+    "updatedAt": "2026-02-10T16:38:00.301953",
+    "steps": {
+      "vod": true,
+      "audio": true,
+      "sanitize": false,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {
+      "audioPath": "backend/out/juggernautjason/vods/2690963552/2690963552_full.wav",
+      "sanitizePath": null,
+      "srtPath": null,
+      "datasetPath": null,
+      "ttsPath": null
+    }
+  },
+  {
+    "id": "job-24-1770747254",
+    "vodUrl": "https://www.twitch.tv/videos/2453173157",
+    "streamer": "JuggernautJason",
+    "title": "Intense Terran vs Terran Highlight Game",
+    "createdAt": "2026-02-10T19:14:14.904060",
+    "updatedAt": "2026-02-10T19:14:14.904060",
+    "steps": {
+      "vod": true,
+      "audio": false,
+      "sanitize": false,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {}
+  },
+  {
+    "id": "job-25-1770750583",
+    "vodUrl": "https://www.twitch.tv/videos/2453173157",
+    "streamer": "JuggernautJason",
+    "title": "Intense Terran vs Terran Highlight Game",
+    "createdAt": "2026-02-10T20:09:43.762252",
+    "updatedAt": "2026-02-10T20:09:43.762252",
+    "steps": {
+      "vod": true,
+      "audio": false,
+      "sanitize": false,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {}
+  },
+  {
+    "id": "job-26-1770750586",
+    "vodUrl": "https://www.twitch.tv/videos/2453173157",
+    "streamer": "JuggernautJason",
+    "title": "Intense Terran vs Terran Highlight Game",
+    "createdAt": "2026-02-10T20:09:46.730475",
+    "updatedAt": "2026-02-10T20:09:46.730475",
+    "steps": {
+      "vod": true,
+      "audio": false,
+      "sanitize": false,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {}
+  },
+  {
+    "id": "job-27-1770752342",
+    "vodUrl": "https://www.twitch.tv/videos/2453173157",
+    "streamer": "JuggernautJason",
+    "title": "Intense Terran vs Terran Highlight Game",
+    "createdAt": "2026-02-10T20:39:02.544421",
+    "updatedAt": "2026-02-10T20:40:53.952166",
+    "steps": {
+      "vod": true,
+      "audio": true,
+      "sanitize": true,
+      "srt": false,
+      "train": false,
+      "tts": false
+    },
+    "outputs": {
+      "audioPath": "backend/out/juggernautjason/vods/2453173157/2453173157_full.wav",
+      "sanitizePath": "backend/out/juggernautjason/vods/2453173157/2453173157_clean.wav",
+      "srtPath": null,
+      "datasetPath": null,
+      "ttsPath": null
+    }
+  }
+]

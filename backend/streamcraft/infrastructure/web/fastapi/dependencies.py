@@ -94,9 +94,29 @@ def get_start_job_step_handler() -> StartJobStepHandler:
 
 def get_fetch_vod_metadata_handler() -> FetchVodMetadataHandler:
     """Get fetch VOD metadata handler with dependencies."""
-    # In production, get credentials from environment or config
-    twitch_client = TwitchApiClient(client_id="your_client_id", client_secret="your_client_secret")
-    return FetchVodMetadataHandler(metadata_fetcher=twitch_client)
+    from streamcraft.settings import get_settings
+    
+    settings = get_settings()
+    
+    # For now, use Twitch as primary. In production, create a composite fetcher
+    # that selects the right client based on platform.
+    if settings.twitch_client_id and settings.twitch_client_secret:
+        twitch_client = TwitchApiClient(
+            client_id=settings.twitch_client_id,
+            client_secret=settings.twitch_client_secret
+        )
+        return FetchVodMetadataHandler(metadata_fetcher=twitch_client)
+    elif settings.youtube_api_key:
+        from streamcraft.infrastructure.vod.youtube import YouTubeApiClient
+        youtube_client = YouTubeApiClient(api_key=settings.youtube_api_key)
+        return FetchVodMetadataHandler(metadata_fetcher=youtube_client)
+    else:
+        # Fallback to placeholder (will fail but won't crash)
+        twitch_client = TwitchApiClient(
+            client_id="TWITCH_CLIENT_ID_NOT_SET",
+            client_secret="TWITCH_CLIENT_SECRET_NOT_SET"
+        )
+        return FetchVodMetadataHandler(metadata_fetcher=twitch_client)
 
 
 def get_extract_audio_handler() -> ExtractAudioHandler:
@@ -150,7 +170,7 @@ def get_download_vod_handler() -> DownloadVodHandler:
                 return Err(VodDownloadFailedError(
                     vod_id=vod_id,
                     platform=str(platform),
-                    reason=f\"Unsupported platform: {platform}\"
+                    reason=f"Unsupported platform: {platform}"
                 ))
     
     return DownloadVodHandler(vod_downloader=MultiPlatformVodDownloader())

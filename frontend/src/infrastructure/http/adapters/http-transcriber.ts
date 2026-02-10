@@ -3,7 +3,7 @@
  * Communicates with backend API to transcribe audio files
  */
 
-import { Result, ok, err } from '../../../domain/shared/result';
+import { Result, Ok, Err } from '../../../domain/shared/result';
 import { Transcript } from '../../../domain/transcription/entities/transcript';
 import { Transcriber } from '../../../domain/transcription/ports/transcriber';
 import { HttpClient } from '../client/http-client';
@@ -36,11 +36,11 @@ export class HttpTranscriber implements Transcriber {
                 language,
             });
 
-            if (response.isErr()) {
-                return err(response.error);
+            if (!response.ok) {
+                return Err(response.error);
             }
 
-            const data = response.value;
+            const data = response.value.data;
             // Create Transcript entity from response
             // Note: This is a simplified version. Real implementation would use proper entity creation
             const transcript: Transcript = {
@@ -57,9 +57,9 @@ export class HttpTranscriber implements Transcriber {
                 createdAt: new Date(data.created_at),
             } as Transcript;
 
-            return ok(transcript);
+            return Ok(transcript);
         } catch (error) {
-            return err(
+            return Err(
                 error instanceof Error ? error : new Error('Failed to transcribe audio')
             );
         }

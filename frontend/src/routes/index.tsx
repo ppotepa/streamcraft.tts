@@ -11,11 +11,21 @@ import { DatasetBuilderPage } from '../presentation/pages/dataset-builder/datase
 import { TranscriptionEditorPage } from '../presentation/pages/transcription-editor/transcription-editor.page';
 import { AudioProcessingPage } from '../presentation/pages/audio-processing/audio-processing.page';
 import { SettingsPage } from '../presentation/pages/settings/settings.page';
+import { WizardPage } from '../presentation/pages/wizard/wizard.page';
+import { ManualReviewPage } from '../presentation/pages/manual-review/manual-review.page';
 
 export const routes: RouteObject[] = [
     {
         path: '/',
-        element: <JobDashboardPage />,
+        element: <WizardPage />,
+    },
+    {
+        path: '/wizard',
+        element: <WizardPage />,
+    },
+    {
+        path: '/review',
+        element: <ManualReviewPage />,
     },
     {
         path: '/jobs',
@@ -44,3 +54,5 @@ export const routes: RouteObject[] = [
     {
         path: '/settings',
         element: <SettingsPage />,
+    },
+];

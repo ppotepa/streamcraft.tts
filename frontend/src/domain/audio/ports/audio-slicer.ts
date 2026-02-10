@@ -2,7 +2,7 @@
  * Audio slicer port.
  */
 
-import { Result } from '@domain/shared/result';
+import { Result } from '../../shared/result';
 import { AudioSegment } from '../entities/audio-segment.entity';
 import { TimeRange } from '../value-objects/time-range';
 

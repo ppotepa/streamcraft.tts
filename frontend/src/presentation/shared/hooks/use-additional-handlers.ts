@@ -10,7 +10,7 @@ import { FilterTranscriptCuesHandler } from '../../../application/transcription/
 import { ParseSubtitlesHandler } from '../../../application/transcription/handlers/parse-subtitles-handler';
 import { ValidateDatasetHandler } from '../../../application/dataset/handlers/validate-dataset-handler';
 import { SplitDatasetHandler } from '../../../application/dataset/handlers/split-dataset-handler';
-import { Result } from '../../../domain/shared/result';
+import type { Result } from '../../../domain/shared/result';
 
 /**
  * Hook for canceling a job

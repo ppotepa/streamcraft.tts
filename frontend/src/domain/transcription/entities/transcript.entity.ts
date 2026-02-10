@@ -2,10 +2,11 @@
  * Transcript entity.
  */
 
-import { TranscriptId } from '@domain/shared/branded-types';
-import { TimeRange } from '@domain/audio/value-objects/time-range';
-import { Cue, isReliableCue } from './cue.entity';
-import { LanguageCode } from '../value-objects/language-code';
+import type { TranscriptId } from '../../shared/branded-types';
+import { TimeRange } from '../../audio/value-objects/time-range';
+import type { Cue } from './cue.entity';
+import { isReliableCue } from './cue.entity';
+import type { LanguageCode } from '../value-objects/language-code';
 
 export interface Transcript {
     readonly id: TranscriptId;

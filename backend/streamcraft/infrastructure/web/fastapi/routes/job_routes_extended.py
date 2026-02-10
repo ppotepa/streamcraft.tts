@@ -81,9 +81,9 @@ class ListJobsResponse(BaseModel):
 
 @router.get("", response_model=ListJobsResponse)
 def list_jobs(
+    handler: Annotated[ListJobsHandler, Depends(get_list_jobs_handler)],
     limit: Annotated[int | None, Query(ge=1, le=100)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
-    handler: Annotated[ListJobsHandler, Depends(get_list_jobs_handler)],
 ) -> ListJobsResponse:
     """List all jobs with pagination."""
     command = ListJobsCommand(limit=limit, offset=offset)

@@ -25,7 +25,7 @@ export class HttpJobRepository implements JobRepository {
     constructor(private readonly httpClient: HttpClient) { }
 
     async save(job: Job): Promise<Result<Job, Error>> {
-        const result = await this.httpClient.post<JobDto>('/api/jobs', {
+        const result = await this.httpClient.post<JobDto>('/jobs/', {
             vod_url: job.vodUrl,
         });
 
@@ -37,7 +37,7 @@ export class HttpJobRepository implements JobRepository {
     }
 
     async findById(jobId: JobId): Promise<Result<Job, JobNotFoundError>> {
-        const result = await this.httpClient.get<JobDto>(`/api/jobs/${jobId}`);
+        const result = await this.httpClient.get<JobDto>(`/jobs/${jobId}`);
 
         if (!result.ok) {
             return Err(new JobNotFoundError(jobId));
@@ -48,7 +48,7 @@ export class HttpJobRepository implements JobRepository {
     }
 
     async findAll(): Promise<Result<ReadonlyArray<Job>, Error>> {
-        const result = await this.httpClient.get<JobDto[]>('/api/jobs');
+        const result = await this.httpClient.get<JobDto[]>('/jobs');
 
         if (!result.ok) {
             return Err(new Error(result.error.message));
@@ -59,7 +59,7 @@ export class HttpJobRepository implements JobRepository {
     }
 
     async delete(jobId: JobId): Promise<Result<void, JobNotFoundError>> {
-        const result = await this.httpClient.delete(`/api/jobs/${jobId}`);
+        const result = await this.httpClient.delete(`/jobs/${jobId}`);
 
         if (!result.ok) {
             return Err(new JobNotFoundError(jobId));

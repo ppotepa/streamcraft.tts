@@ -2,8 +2,8 @@
  * Audio file entity.
  */
 
-import { AudioFileId } from '@domain/shared/branded-types';
-import { Duration } from '@domain/shared/value-objects';
+import { AudioFileId } from '../../shared/branded-types';
+import { Duration } from '../../shared/value-objects';
 import { AudioFormat } from '../value-objects/audio-format';
 import { SampleRate } from '../value-objects/sample-rate';
 

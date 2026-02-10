@@ -31,7 +31,7 @@ class CreateJobResponse(BaseModel):
     created_at: str
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=CreateJobResponse)
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=CreateJobResponse)
 def create_job(
     request: CreateJobRequest,
     handler: CreateJobHandler = Depends(get_create_job_handler),

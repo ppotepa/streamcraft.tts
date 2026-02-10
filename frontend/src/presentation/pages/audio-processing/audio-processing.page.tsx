@@ -164,8 +164,8 @@ export const AudioProcessingPage = () => {
                     <div key={step.id} className="flex items-center">
                         <div
                             className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${index <= currentIndex
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-500'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-500'
                                 }`}
                         >
                             {index + 1}

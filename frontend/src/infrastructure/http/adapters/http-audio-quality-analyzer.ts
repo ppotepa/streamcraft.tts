@@ -3,7 +3,7 @@
  * Communicates with backend API to analyze audio quality
  */
 
-import { Result, ok, err } from '../../../domain/shared/result';
+import { Result, Ok, Err } from '../../../domain/shared/result';
 import { AudioQualityMetrics } from '../../../domain/audio/entities/audio-quality-metrics';
 import { AudioQualityAnalyzer } from '../../../domain/audio/ports/audio-quality-analyzer';
 import { HttpClient } from '../client/http-client';
@@ -22,11 +22,11 @@ export class HttpAudioQualityAnalyzer implements AudioQualityAnalyzer {
                 audio_path: audioPath,
             });
 
-            if (response.isErr()) {
-                return err(response.error);
+            if (!response.ok) {
+                return Err(response.error);
             }
 
-            const data = response.value;
+            const data = response.value.data;
             // Create AudioQualityMetrics from response
             // Note: This is a simplified version
             const metrics: AudioQualityMetrics = {
@@ -36,9 +36,9 @@ export class HttpAudioQualityAnalyzer implements AudioQualityAnalyzer {
                 clippingSeconds: data.clipping_seconds,
             } as AudioQualityMetrics;
 
-            return ok(metrics);
+            return Ok(metrics);
         } catch (error) {
-            return err(
+            return Err(
                 error instanceof Error ? error : new Error('Failed to analyze audio quality')
             );
         }

@@ -9,12 +9,39 @@
 
 param(
     [string]$BackendHost = "127.0.0.1",
-    [int]$BackendPort = 8000,
+    [int]$BackendPort = 5010,
     [int]$FrontendPort = 5173
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+
+function Stop-ProcessOnPort {
+    param(
+        [int]$Port,
+        [string]$Label
+    )
+
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $Port -ErrorAction Stop
+    }
+    catch {
+        return
+    }
+
+    $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -gt 0 }
+    if (-not $pids) { return }
+
+    Write-Host "🛑 Stopping existing $Label process on port $Port (PID(s): $($pids -join ', '))" -ForegroundColor Yellow
+    foreach ($processId in $pids) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host "⚠️  Could not stop PID $processId`: $($_)" -ForegroundColor DarkYellow
+        }
+    }
+}
 
 Write-Host "`n🚀 StreamCraft TTS - Development Mode" -ForegroundColor Cyan
 Write-Host "═══════════════════════════════════════" -ForegroundColor DarkGray
@@ -42,13 +69,34 @@ Write-Host "  Frontend: http://localhost:$FrontendPort" -ForegroundColor Gray
 Write-Host "  API Docs: http://$BackendHost`:$BackendPort/docs" -ForegroundColor Gray
 Write-Host ""
 
+# Stop any existing servers bound to our dev ports
+Stop-ProcessOnPort -Port $BackendPort -Label "backend (python/uvicorn)"
+Stop-ProcessOnPort -Port $FrontendPort -Label "frontend (npm/vite)"
+
 # Start backend in background
 Write-Host "🔧 Starting backend (uvicorn with auto-reload)..." -ForegroundColor Yellow
 $backendJob = Start-Job -ScriptBlock {
-    param($root, $pythonExe, $host, $port)
-    Set-Location (Join-Path $root "backend")
-    & $pythonExe -m uvicorn streamcraft.infrastructure.web.fastapi.app:app --reload --host $host --port $port
-} -ArgumentList $root, $pythonExe, $BackendHost, $BackendPort
+    param($backendDir, $pythonExe, $hostname, $port)
+    $ErrorActionPreference = 'Continue'
+    Set-Location $backendDir
+    $env:PYTHONUNBUFFERED = "1"
+    & $pythonExe -m uvicorn streamcraft.infrastructure.web.fastapi.app:app --reload --host $hostname --port $port 2>&1
+} -ArgumentList (Join-Path $root "backend"), $pythonExe, $BackendHost, $BackendPort
+
+# Wait a moment and check if job started successfully
+Start-Sleep -Seconds 1
+if ($backendJob.State -eq 'Failed') {
+    Write-Host "❌ Backend job failed to start" -ForegroundColor Red
+    $backendError = Receive-Job -Job $backendJob 2>&1
+    if ($backendError) {
+        Write-Host "Error details:" -ForegroundColor Yellow
+        $backendError | ForEach-Object {
+            Write-Host "  $_" -ForegroundColor Red
+        }
+    }
+    Remove-Job -Job $backendJob -Force -ErrorAction SilentlyContinue
+    exit 1
+}
 
 Start-Sleep -Seconds 2
 
@@ -93,8 +141,26 @@ try {
         }
         
         # Check if jobs are still running
-        if ($backendJob.State -eq 'Failed' -or $frontendJob.State -eq 'Failed') {
-            Write-Host "`n❌ One or more servers failed" -ForegroundColor Red
+        if ($backendJob.State -eq 'Failed') {
+            Write-Host "`n❌ Backend server failed" -ForegroundColor Red
+            $backendError = Receive-Job -Job $backendJob -ErrorAction SilentlyContinue 2>&1
+            if ($backendError) {
+                Write-Host "Backend error:" -ForegroundColor Yellow
+                $backendError | ForEach-Object {
+                    Write-Host "  $_" -ForegroundColor Red
+                }
+            }
+            break
+        }
+        if ($frontendJob.State -eq 'Failed') {
+            Write-Host "`n❌ Frontend server failed" -ForegroundColor Red
+            $frontendError = Receive-Job -Job $frontendJob -ErrorAction SilentlyContinue 2>&1
+            if ($frontendError) {
+                Write-Host "Frontend error:" -ForegroundColor Yellow
+                $frontendError | ForEach-Object {
+                    Write-Host "  $_" -ForegroundColor Red
+                }
+            }
             break
         }
         

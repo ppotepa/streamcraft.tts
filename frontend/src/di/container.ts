@@ -4,7 +4,7 @@
  */
 
 import { FetchClient } from '../infrastructure/http/client/fetch-client';
-import { HttpJobRepository } from '../infrastructure/http/repositories/http-job-repository';
+import { HttpJobRepository } from '../infrastructure/http/repositories/http-job.repository';
 import { HttpVodMetadataFetcher } from '../infrastructure/http/repositories/http-vod-metadata-fetcher';
 import { HttpTranscriptionRepository } from '../infrastructure/http/repositories/http-transcription-repository';
 import { HttpDatasetRepository } from '../infrastructure/http/repositories/http-dataset-repository';
