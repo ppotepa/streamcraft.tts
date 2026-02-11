@@ -18,6 +18,57 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
+function Stop-StreamcraftPythonProcesses {
+    Write-Host "`n🧹 Cleaning up existing Python processes..." -ForegroundColor Yellow
+    
+    # Find all python.exe processes running uvicorn or streamcraft
+    $pythonProcs = Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object {
+        $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+        $cmdLine -and ($cmdLine -like "*uvicorn*" -or $cmdLine -like "*streamcraft*")
+    }
+    
+    if ($pythonProcs) {
+        $pythonProcs | ForEach-Object {
+            Write-Host "  Stopping Python process (PID $($_.Id))" -ForegroundColor Gray
+            try {
+                Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Host "  ⚠️  Could not stop PID $($_.Id)`: $($_)" -ForegroundColor DarkYellow
+            }
+        }
+        # Give processes time to clean up
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+function Stop-ProcessOnPort {
+    param(
+        [int]$Port,
+        [string]$Label
+    )
+
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $Port -ErrorAction Stop
+    }
+    catch {
+        return
+    }
+
+    $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -gt 0 }
+    if (-not $pids) { return }
+
+    Write-Host "🛑 Stopping existing $Label process on port $Port (PID(s): $($pids -join ', '))" -ForegroundColor Yellow
+    foreach ($processId in $pids) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+        }
+        catch {
+            Write-Host "  ⚠️  Could not stop PID $processId`: $($_)" -ForegroundColor DarkYellow
+        }
+    }
+}
+
 Write-Host "`nStreamCraft TTS - Watch Mode" -ForegroundColor Cyan
 Write-Host "=======================================" -ForegroundColor DarkGray
 
@@ -54,6 +105,15 @@ if (-not $BackendOnly) {
     Write-Host "  Frontend: http://localhost:$FrontendPort (HMR)" -ForegroundColor Gray
 }
 Write-Host ""
+
+# Clean up any lingering processes first
+Stop-StreamcraftPythonProcesses
+if (-not $FrontendOnly) {
+    Stop-ProcessOnPort -Port $BackendPort -Label "backend (python/uvicorn)"
+}
+if (-not $BackendOnly) {
+    Stop-ProcessOnPort -Port $FrontendPort -Label "frontend (npm/vite)"
+}
 
 $jobs = @()
 

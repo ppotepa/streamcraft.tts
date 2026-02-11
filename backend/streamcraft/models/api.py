@@ -62,6 +62,7 @@ class RunSanitizeRequest(BaseModel):
     """Audio sanitization request."""
     vodUrl: str
     jobId: Optional[str] = None
+    runId: Optional[str] = None  # Optional run identifier for versioning
     outdir: str = "out"
     datasetOut: str = "dataset"
     auto: bool = True

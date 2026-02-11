@@ -48,6 +48,47 @@ body {
     backdrop-filter: blur(10px);
 }
 
+/* Chat bubble animations */
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.animate-slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+}
+
+/* Telegram-style chat theme */
+.telegram-chat-bg {
+    background:
+        linear-gradient(135deg, rgba(14, 22, 33, 0.98) 0%, rgba(10, 16, 26, 0.98) 100%),
+        repeating-linear-gradient(45deg,
+            transparent,
+            transparent 10px,
+            rgba(255, 255, 255, 0.01) 10px,
+            rgba(255, 255, 255, 0.01) 20px);
+}
+
+.telegram-bubble {
+    background: linear-gradient(135deg, rgba(42, 114, 218, 0.25) 0%, rgba(56, 145, 255, 0.2) 100%);
+    border: 1px solid rgba(56, 145, 255, 0.3);
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
+}
+
+.telegram-bubble:hover {
+    background: linear-gradient(135deg, rgba(42, 114, 218, 0.35) 0%, rgba(56, 145, 255, 0.3) 100%);
+    border-color: rgba(56, 145, 255, 0.5);
+    transform: translateX(-2px);
+}
+
 .grid-bg {
     background-image:
         linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),

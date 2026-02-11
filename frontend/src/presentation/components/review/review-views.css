@@ -1,0 +1,738 @@
+/* =============================================================================
+   Review Views - Unified styling for TableView, FocusView, and TimelineView
+   ============================================================================= */
+
+/* Common Variables */
+:root {
+    --color-bg-dark: #0e1117;
+    --color-bg-card: #1a1e26;
+    --color-border: #2a2f3a;
+    --color-text: #e3e8f0;
+    --color-text-muted: #a3adbf;
+    --color-primary: #4a9eff;
+    --color-success: #4ade80;
+    --color-danger: #f87171;
+    --color-warning: #fbbf24;
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* =============================================================================
+   Table View Styles
+   ============================================================================= */
+
+.table-view {
+    background-color: var(--color-bg-dark);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+}
+
+.table-view table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table-view thead {
+    background-color: var(--color-bg-card);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.table-view th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--color-text);
+    border-bottom: 2px solid var(--color-border);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color var(--transition-fast);
+    white-space: nowrap;
+}
+
+.table-view th:hover {
+    background-color: #21262f;
+}
+
+.table-view th.sortable::after {
+    content: ' ⇅';
+    color: var(--color-text-muted);
+    font-size: 0.75rem;
+}
+
+.table-view tbody tr {
+    border-bottom: 1px solid var(--color-border);
+    transition: background-color var(--transition-fast);
+    cursor: pointer;
+}
+
+.table-view tbody tr:hover {
+    background-color: #191d26;
+}
+
+.table-view tbody tr.selected {
+    background-color: rgba(74, 158, 255, 0.1);
+}
+
+.table-view td {
+    padding: 12px 16px;
+    font-size: 0.875rem;
+    color: var(--color-text);
+}
+
+.table-view td[contenteditable="true"] {
+    outline: 1px solid transparent;
+    transition: outline-color var(--transition-fast);
+}
+
+.table-view td[contenteditable="true"]:focus {
+    outline-color: var(--color-primary);
+    background-color: #21262f;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-kept {
+    background-color: rgba(74, 222, 128, 0.1);
+    color: var(--color-success);
+}
+
+.badge-rejected {
+    background-color: rgba(248, 113, 113, 0.1);
+    color: var(--color-danger);
+}
+
+.badge-review {
+    background-color: rgba(251, 191, 36, 0.1);
+    color: var(--color-warning);
+}
+
+.metric-good {
+    color: var(--color-success);
+    font-weight: 600;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.action-btn {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-card);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.action-btn:hover {
+    background-color: #21262f;
+    border-color: var(--color-primary);
+}
+
+.action-btn.accept {
+    border-color: var(--color-success);
+    color: var(--color-success);
+}
+
+.action-btn.accept:hover {
+    background-color: rgba(74, 222, 128, 0.1);
+}
+
+.action-btn.reject {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.action-btn.reject:hover {
+    background-color: rgba(248, 113, 113, 0.1);
+}
+
+/* =============================================================================
+   Focus View Styles
+   ============================================================================= */
+
+.focus-view-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 32px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.focus-card {
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 1200px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.focus-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.focus-title {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.focus-title h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.segment-badge {
+    background-color: rgba(74, 158, 255, 0.1);
+    color: var(--color-primary);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 4px;
+    background-color: #2a2f3a;
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 0 16px;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--color-primary);
+    transition: width 0.3s ease;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 8px;
+    line-height: 1;
+    transition: color var(--transition-fast);
+}
+
+.close-btn:hover {
+    color: var(--color-text);
+}
+
+.focus-body {
+    padding: 32px;
+}
+
+.section {
+    margin-bottom: 32px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.toggle-btn {
+    background-color: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.toggle-btn:hover {
+    border-color: var(--color-primary);
+    color: var(--color-text);
+}
+
+.waveform-container {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 16px;
+    height: 120px;
+    margin-bottom: 16px;
+}
+
+.playback-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.play-btn {
+    background-color: var(--color-primary);
+    border: none;
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.play-btn:hover {
+    background-color: #3d8ae6;
+    transform: scale(1.05);
+}
+
+.speed-control {
+    display: flex;
+    gap: 4px;
+}
+
+.speed-btn {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.speed-btn.active {
+    background-color: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.original-section {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.comparison-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.comparison-metric {
+    text-align: center;
+}
+
+.comparison-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    display: block;
+    margin-bottom: 4px;
+}
+
+.comparison-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.improvement {
+    font-size: 0.875rem;
+    color: var(--color-success);
+    margin-left: 8px;
+}
+
+.text-editor {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 20px;
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--color-text);
+    min-height: 120px;
+    outline: none;
+    transition: border-color var(--transition-fast);
+}
+
+.text-editor:focus {
+    border-color: var(--color-primary);
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.metric-box {
+    text-align: center;
+}
+
+.metric-label {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    display: block;
+    margin-bottom: 8px;
+}
+
+.metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.metric-value.good {
+    color: var(--color-success);
+}
+
+.focus-footer {
+    padding: 24px 32px;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.nav-btn {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.nav-btn:hover {
+    background-color: #21262f;
+    border-color: var(--color-primary);
+}
+
+.action-buttons-focus {
+    display: flex;
+    gap: 12px;
+}
+
+.action-btn-large {
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.action-btn-large.accept {
+    background-color: var(--color-success);
+    color: white;
+}
+
+.action-btn-large.accept:hover {
+    background-color: #3dbd6f;
+    transform: scale(1.05);
+}
+
+.action-btn-large.skip {
+    background-color: var(--color-bg-dark);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+}
+
+.action-btn-large.skip:hover {
+    background-color: #21262f;
+}
+
+.action-btn-large.reject {
+    background-color: var(--color-danger);
+    color: white;
+}
+
+.action-btn-large.reject:hover {
+    background-color: #e85555;
+    transform: scale(1.05);
+}
+
+.keyboard-shortcuts {
+    background-color: var(--color-bg-dark);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 24px;
+}
+
+.keyboard-shortcuts h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 12px 0;
+}
+
+.shortcuts-list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+
+.shortcut-item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.75rem;
+}
+
+.key {
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    color: var(--color-primary);
+    min-width: 24px;
+    text-align: center;
+}
+
+.key-desc {
+    color: var(--color-text-muted);
+}
+
+/* =============================================================================
+   Timeline View Styles
+   ============================================================================= */
+
+.timeline-view {
+    background-color: var(--color-bg-dark);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+}
+
+.timeline-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 24px;
+}
+
+.timeline-track {
+    display: flex;
+    gap: 16px;
+    min-width: min-content;
+}
+
+.segment-card {
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    width: 280px;
+    flex-shrink: 0;
+    padding: 16px;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.segment-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    border-color: var(--color-primary);
+}
+
+.segment-card.rejected {
+    opacity: 0.6;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.segment-number {
+    background-color: rgba(74, 158, 255, 0.1);
+    color: var(--color-primary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.card-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-time {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+}
+
+.card-waveform {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    height: 60px;
+    background-color: var(--color-bg-dark);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 12px;
+    gap: 2px;
+}
+
+.mini-bar {
+    width: 8px;
+    background: linear-gradient(to top, var(--color-primary), var(--color-primary) 70%, transparent);
+    border-radius: 2px;
+    transition: all var(--transition-fast);
+}
+
+.segment-card:hover .mini-bar {
+    background: linear-gradient(to top, #3d8ae6, #3d8ae6 70%, transparent);
+}
+
+.card-text {
+    font-size: 0.875rem;
+    color: var(--color-text);
+    line-height: 1.5;
+    margin-bottom: 12px;
+    max-height: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.metric {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.card-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.card-actions .action-btn {
+    flex: 1;
+    padding: 8px;
+    font-size: 0.75rem;
+}
+
+/* =============================================================================
+   Responsive Adjustments
+   ============================================================================= */
+
+@media (max-width: 1024px) {
+    .focus-card {
+        max-width: 95vw;
+    }
+
+    .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .shortcuts-list {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .focus-view-overlay {
+        padding: 16px;
+    }
+
+    .focus-header,
+    .focus-body,
+    .focus-footer {
+        padding: 16px;
+    }
+
+    .comparison-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .shortcuts-list {
+        grid-template-columns: 1fr;
+    }
+
+    .segment-card {
+        width: 240px;
+    }
+}

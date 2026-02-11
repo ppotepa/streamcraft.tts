@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import hashlib
 import os
 from pathlib import Path
@@ -60,13 +61,45 @@ def fallback_vod_slug(vod: str) -> str:
     return Path(vod).stem or "vod"
 
 
-def resolve_output_dirs(vod: str, out_root: Path, dataset_root: Path) -> Tuple[str, Path, Path]:
+def generate_run_id() -> str:
+    """Generate a unique run identifier based on current timestamp."""
+    return datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+
+def resolve_output_dirs(
+    vod: str, 
+    out_root: Path, 
+    dataset_root: Path,
+    run_id: Optional[str] = None,
+) -> Tuple[str, Path, Path]:
+    """
+    Resolve output directories for VOD processing.
+    
+    Args:
+        vod: VOD URL or local path
+        out_root: Base output directory
+        dataset_root: Base dataset directory
+        run_id: Optional run identifier for versioning. If None, uses legacy flat structure.
+    
+    Returns:
+        Tuple of (streamer_slug, vod_dir, dataset_dir)
+        - vod_dir: Always flat structure (out_root/streamer/vods/vod_slug)
+        - dataset_dir: Versioned if run_id provided (dataset_root/streamer/runs/run_id)
+                       Otherwise flat (dataset_root/streamer)
+    """
     streamer, vod_identifier = describe_vod(vod)
     streamer_slug = slugify_label(streamer, "unknown")
     vod_slug = slugify_label(vod_identifier, fallback_vod_slug(vod))
 
     vod_dir = out_root / streamer_slug / "vods" / vod_slug
-    dataset_dir = dataset_root / streamer_slug
+    
+    if run_id:
+        # Versioned structure: dataset_root/streamer/runs/run_id/
+        dataset_dir = dataset_root / streamer_slug / "runs" / run_id
+    else:
+        # Legacy flat structure: dataset_root/streamer/
+        dataset_dir = dataset_root / streamer_slug
+    
     return streamer_slug or "unknown", vod_dir, dataset_dir
 
 

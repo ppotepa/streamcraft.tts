@@ -8,6 +8,7 @@ from streamcraft.infrastructure.web.fastapi.routes import (
     dataset_router,
     job_extended_router,
     job_router,
+    run_router,
     transcription_router,
     vod_router,
 )
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(audio_router, prefix="/api")
     app.include_router(transcription_router, prefix="/api")
     app.include_router(dataset_router, prefix="/api")
+    app.include_router(run_router, prefix="/api")
     app.include_router(legacy_routes.router, prefix="/api/legacy")
 
     # Health check endpoint

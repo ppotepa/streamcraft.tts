@@ -612,7 +612,13 @@ export const WizardPage: React.FC = () => {
         }
 
         debounceRef.current = window.setTimeout(async () => {
-            const parsed = parseVodUrl(vodInput.trim());
+            // DEV easter egg: 'dev' translates to development VOD
+            let actualVodUrl = vodInput.trim();
+            if (actualVodUrl.toLowerCase() === 'dev') {
+                actualVodUrl = 'https://www.twitch.tv/videos/2453173157';
+            }
+
+            const parsed = parseVodUrl(actualVodUrl);
             if (!parsed) {
                 setVodInvalid(true);
                 applyLegacyJob(null);
@@ -621,10 +627,10 @@ export const WizardPage: React.FC = () => {
 
             setVodInvalid(false);
             resetRevealState();
-            setVodUrl(vodInput.trim());
+            setVodUrl(actualVodUrl);
             resetMetadata();
             await fetchMetadata(parsed.vodId, parsed.platform);
-            await loadLegacyJob(vodInput.trim());
+            await loadLegacyJob(actualVodUrl);
         }, 650);
 
         return () => {
@@ -1176,7 +1182,7 @@ export const WizardPage: React.FC = () => {
                         <span className="help-tip" data-tip="Paste a VOD URL to fetch metadata and unlock the rest of the flow.">?</span>
                     </h2>
                     <p className="text-sm text-slate-400">
-                        Paste a Twitch or YouTube VOD URL to fetch metadata.
+                        Paste a Twitch or YouTube VOD URL to fetch metadata. Tip: type 'dev' for quick testing.
                     </p>
 
                     <div className="mt-4">
@@ -1217,7 +1223,7 @@ export const WizardPage: React.FC = () => {
                                 <span className="text-2xl">:(</span>
                                 <div>
                                     <p className="text-sm font-semibold">Invalid VOD link</p>
-                                    <p className="text-xs text-slate-400">Paste a Twitch or YouTube VOD URL.</p>
+                                    <p className="text-xs text-slate-400">Paste a Twitch or YouTube VOD URL. Tip: type 'dev' for quick testing.</p>
                                 </div>
                             </div>
                         </div>

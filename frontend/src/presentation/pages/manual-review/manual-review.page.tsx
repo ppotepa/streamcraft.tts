@@ -1,383 +1,19 @@
 /**
- * Manual Review Page
- * Rich approve/reject view for sanitized segments.
- */
-
-import React, { useCallback, useEffect, useMemo, useRef, useState, useDeferredValue } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { config } from '../../../config';
-
-type SegmentItem = {
-    index: number;
-    start: number;
-    end: number;
-    duration: number;
-    cleanStart?: number | null;
-    cleanEnd?: number | null;
-    kept?: boolean | null;
-    quality?: number | null;
-    speechRatio?: number | null;
-    snrDb?: number | null;
-    clipRatio?: number | null;
-    sfxScore?: number | null;
-    speakerSim?: number | null;
-    labels: string[];
-    rejectReason: string[];
-};
-
-type ReviewVote = {
-    index: number;
-    decision: 'accept' | 'reject';
-    segment: SegmentItem;
-    note?: string | null;
-};
-
-type ReviewState = {
-    totalSegments: number;
-    reviewIndex: number;
-    accepted: number;
-    rejected: number;
-    votes: ReviewVote[];
-    updatedAt?: string | null;
-};
-
-type SegmentManifestResponse = {
-    sampleRate: number;
-    cleanPath?: string | null;
-    originalPath?: string | null;
-    segments: SegmentItem[];
-    total?: number | null;
-    offset?: number | null;
-    limit?: number | null;
-    hasMore?: boolean | null;
-};
-
-type ManualReviewPageProps = {
-    vodUrlOverride?: string;
-};
-
-type HistoryEntry = {
-    index: number;
-    prevDecision: 'accept' | 'reject' | null;
-};
-
-const formatTime = (value: number) => `${value.toFixed(2)}s`;
-
-const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
-
-    const [segments, setSegments] = useState<SegmentItem[]>([]);
-    const [cleanPath, setCleanPath] = useState<string | null>(null);
-    const [originalPath, setOriginalPath] = useState<string | null>(null);
-    const [votes, setVotes] = useState<Record<number, 'accept' | 'reject'>>({});
-    const [notes, setNotes] = useState<Record<number, string>>({});
-    const [selected, setSelected] = useState<Record<number, boolean>>({});
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [reviewMeta, setReviewMeta] = useState<ReviewState | null>(null);
-    const [activeId, setActiveId] = useState<number | null>(null);
-    const [history, setHistory] = useState<HistoryEntry[]>([]);
-    const [compactMode, setCompactMode] = useState(false);
-    const [filterMode, setFilterMode] = useState('all');
-    const [sortMode, setSortMode] = useState('start');
-    const [autoRejectSnr, setAutoRejectSnr] = useState(6);
-    const [autoRejectSpeech, setAutoRejectSpeech] = useState(0.4);
-    const [autoRejectDuration, setAutoRejectDuration] = useState(0.6);
-    const [playingId, setPlayingId] = useState<number | null>(null);
-    const [playhead, setPlayhead] = useState(0);
-    const [playbackSource, setPlaybackSource] = useState<'clean' | 'original'>('clean');
-    const [totalSegments, setTotalSegments] = useState(0);
-    const [pageOffset, setPageOffset] = useState(0);
-    const [pageLimit, setPageLimit] = useState(200);
-    const [hasMore, setHasMore] = useState(false);
-    const [showTimeline, setShowTimeline] = useState(() => {
-        const stored = localStorage.getItem('reviewShowTimeline');
-        return stored !== null ? stored === 'true' : true;
-    });
-    const [showTrays, setShowTrays] = useState(() => {
-        const stored = localStorage.getItem('reviewShowTrays');
-        return stored !== null ? stored === 'true' : true;
-    });
-    const [perfMode, setPerfMode] = useState(() => {
-        const stored = localStorage.getItem('reviewPerfMode');
-        return stored !== null ? stored === 'true' : false;
-    });
-    const [suggestionRunning, setSuggestionRunning] = useState(false);
-    const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
-    const [playbackMessage, setPlaybackMessage] = useState<string | null>(null);
-    const [transcriptWords, setTranscriptWords] = useState<Array<{ word: string; start: number; end: number }>>([]);
-    const [transcribing, setTranscribing] = useState(false);
-    const [currentWordIndex, setCurrentWordIndex] = useState<number>(-1);
-
-    const audioRef = useRef<HTMLAudioElement | null>(null);
-    const playbackEndRef = useRef<number | null>(null);
-    const pendingPlayRef = useRef<'clean' | 'original' | null>(null);
-    const pendingSegmentRef = useRef<SegmentItem | null>(null);
-    const votesRef = useRef<Record<number, 'accept' | 'reject'>>({});
-    const listRef = useRef<HTMLDivElement | null>(null);
-    const scrollRafRef = useRef<number | null>(null);
-    const [scrollTop, setScrollTop] = useState(0);
-    const [viewportHeight, setViewportHeight] = useState(520);
-
-    const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
-
-    const getArtifactUrl = useCallback(
-        (path: string) => `${baseUrl}/legacy/artifact?path=${encodeURIComponent(path)}`,
-        [baseUrl]
-    );
-
-    const fetchSegments = async (nextOffset = 0, nextLimit = pageLimit): Promise<void> => {
-        if (!vodUrl) {
-            setError('Provide vodUrl in query string.');
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        try {
-            const response = await fetch(
-                `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${nextOffset}&limit=${nextLimit}`
-            );
-            const data: SegmentManifestResponse = await response.json();
-            if (!response.ok) {
-                throw new Error((data as { detail?: string }).detail || 'Failed to load segments');
-            }
-            setSegments(data.segments || []);
-            setCleanPath(data.cleanPath || null);
-            setOriginalPath((data as { originalPath?: string | null }).originalPath || null);
-            setTotalSegments(data.total ?? data.segments?.length ?? 0);
-            setHasMore(Boolean(data.hasMore));
-            setPageOffset(data.offset ?? nextOffset);
-            setPageLimit(data.limit ?? nextLimit);
-        } catch (err) {
-            setError((err as Error).message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchReview = async (): Promise<void> => {
-        if (!vodUrl) return;
-        try {
-            const response = await fetch(
-                `${baseUrl}/legacy/sanitize/review?vodUrl=${encodeURIComponent(vodUrl)}`
-            );
-            const data: ReviewState = await response.json();
-            if (!response.ok) {
-                throw new Error((data as { detail?: string }).detail || 'Failed to load review');
-            }
-            setReviewMeta(data);
-            const nextVotes: Record<number, 'accept' | 'reject'> = {};
-            const nextNotes: Record<number, string> = {};
-            (data.votes || []).forEach((vote: ReviewVote) => {
-                nextVotes[vote.index] = vote.decision;
-                if (vote.note) {
-                    nextNotes[vote.index] = vote.note;
-                }
-            });
-            setVotes(nextVotes);
-            setNotes(nextNotes);
-        } catch (err) {
-            setError((err as Error).message);
-        }
-    };
-
-    const handleLoad = async (): Promise<void> => {
-        await Promise.all([fetchSegments(0, pageLimit), fetchReview()]);
-    };
-
-    useEffect(() => {
-        if (!vodUrl) return;
-        setPageOffset(0);
-        setSegments([]);
-        handleLoad();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vodUrl]);
-
-    useEffect(() => {
-        votesRef.current = votes;
-    }, [votes]);
-
-
-    const summary = useMemo(() => {
-        const total = totalSegments || segments.length;
-        const accepted = Object.values(votes).filter((v) => v === 'accept').length;
-        const rejected = Object.values(votes).filter((v) => v === 'reject').length;
-        const remaining = Math.max(0, total - accepted - rejected);
-        const percent = total > 0 ? Math.round(((accepted + rejected) / total) * 100) : 0;
-        return { total, accepted, rejected, remaining, percent };
-    }, [segments, totalSegments, votes]);
-
-    const keptCount = useMemo(
-        () => segments.filter((segment) => segment.kept).length,
-        [segments]
-    );
-
-    const keptRatio = useMemo(() => {
-        if (!segments.length) return 0;
-        return keptCount / segments.length;
-    }, [segments.length, keptCount]);
-
-    const sanitizeSuggestion = useMemo(() => {
-        if (!segments.length) return null;
-        if (keptCount === 0) {
-            return {
-                title: 'No segments retained',
-                reason: 'Sanitize rejected every segment. Try a safer profile.',
-                settings: { mode: 'auto', preset: 'lenient', strictness: 0.4, extractVocals: false },
-            } as const;
-        }
-        if (keptRatio < 0.2) {
-            return {
-                title: 'Very few segments retained',
-                reason: 'Relax the filters to keep more usable speech.',
-                settings: { mode: 'auto', preset: 'balanced', strictness: 0.5, extractVocals: false },
-            } as const;
-        }
-        return null;
-    }, [segments.length, keptCount, keptRatio]);
-
-    const runSuggestedSanitize = useCallback(async () => {
-        if (!sanitizeSuggestion || !vodUrl) return;
-        setSuggestionRunning(true);
-        setSuggestionMessage(null);
-        try {
-            const response = await fetch(`${baseUrl}/legacy/sanitize/run`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    vodUrl,
-                    mode: sanitizeSuggestion.settings.mode,
-                    preset: sanitizeSuggestion.settings.preset,
-                    strictness: sanitizeSuggestion.settings.strictness,
-                    extractVocals: sanitizeSuggestion.settings.extractVocals,
-                    stream: false,
-                }),
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data?.detail || 'Sanitize failed');
-            }
-            setSuggestionMessage('Sanitize complete. Reloading segments...');
-            await handleLoad();
-        } catch (err) {
-            setSuggestionMessage((err as Error).message);
-        } finally {
-            setSuggestionRunning(false);
-        }
-    }, [baseUrl, handleLoad, sanitizeSuggestion, vodUrl]);
-
-    const cleanOffsets = useMemo(() => {
-        const map = new Map<number, { start: number; end: number }>();
-        segments.forEach((segment) => {
-            if (segment.cleanStart === null || segment.cleanStart === undefined) return;
-            if (segment.cleanEnd === null || segment.cleanEnd === undefined) return;
-            map.set(segment.index, { start: segment.cleanStart, end: segment.cleanEnd });
-        });
-        return map;
-    }, [segments]);
-
-    const fetchSegmentTranscription = useCallback(async (segmentIndex: number) => {
-        if (!vodUrl) return;
-
-        console.log('[Transcription] Starting fetch for segment', segmentIndex);
-        setTranscribing(true);
-        setTranscriptWords([]);
-        setCurrentWordIndex(-1);
-
-        try {
-            const response = await fetch(`${baseUrl}/transcriptions/transcribe-segment`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    vodUrl,
-                    segmentIndex,
-                }),
-            });
-
-            if (!response.ok || !response.body) {
-                throw new Error('Transcription request failed');
-            }
-
-            console.log('[Transcription] Response received, starting stream...');
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            const words: Array<{ word: string; start: number; end: number }> = [];
-
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() ?? '';
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed) continue;
-
-                    const evt = JSON.parse(trimmed);
-
-                    if (evt.type === 'word') {
-                        words.push({
-                            word: evt.word,
-                            start: evt.start,
-                            end: evt.end,
-                        });
-                        setTranscriptWords([...words]);
-                        console.log('[Transcription] Word received:', evt.word, 'Total:', words.length);
-                    } else if (evt.type === 'segment') {
-                        // Fallback: add whole segment text as single "word"
-                        const seg = segments[segmentIndex];
-                        const duration = seg ? seg.duration : evt.end - evt.start;
-                        words.push({
-                            word: evt.text,
-                            start: 0,
-                            end: duration,
-                        });
-                        setTranscriptWords([...words]);
-                        console.log('[Transcription] Segment text received:', evt.text);
-                    } else if (evt.type === 'error') {
-                        console.error('[Transcription] Error from server:', evt.message);
-                    } else if (evt.type === 'done') {
-                        console.log('[Transcription] Stream complete, total words:', words.length);
-                    }
-                }
-            }
-        } catch (err) {
-            console.error('[Transcription] Failed to fetch:', err);
-        } finally {
-            setTranscribing(false);
-        }
-    }, [vodUrl, baseUrl, segments]);
-
-    const getSegmentBounds = useCallback(
-        (segment: SegmentItem, source: 'clean' | 'original') => {
-            if (source === 'clean') {
-                const mapped = cleanOffsets.get(segment.index);
-                if (mapped) return mapped;
-            }
-            return { start: segment.start, end: segment.end };
-        },
-        [cleanOffsets]
-    );
-
-    const totalDuration = useMemo(() => {
-        if (segments.length === 0) return 0;
-        return Math.max(...segments.map((segment) => segment.end));
-    }, [segments]);
-
-    const timelineSegments = useMemo(() => {
-        if (!totalDuration || !showTimeline || perfMode) return [];
-        return segments.map((segment) => {
-            const left = (segment.start / totalDuration) * 100;
-            const width = Math.max(0.4, ((segment.end - segment.start) / totalDuration) * 100);
-            const decision = votes[segment.index] || 'pending';
-            return {
-                index: segment.index,
-                left,
-                width,
-                decision,
+                        {loading ? (
+                            <div className="text-sm text-slate-400">Loading segments...</div>
+                        ) : segments.length === 0 ? (
+                            <div className="glass rounded-2xl p-4 text-sm text-slate-400">
+                                No segments loaded yet. Run Sanitize in the wizard, then click Load Latest.
+                            </div>
+                        ) : (
+                            <div className="glass rounded-2xl p-4">
+                                <ReviewManager
+                                    segments={segments.map(mapToReviewSegment)}
+                                    onSegmentUpdate={handleSegmentUpdate}
+                                    onSegmentAction={handleSegmentAction}
+                                />
+                            </div>
+                        )}
             };
         });
     }, [segments, totalDuration, votes, showTimeline, perfMode]);
@@ -488,6 +124,71 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
             return next;
         });
     }, []);
+
+    // Map SegmentItem to FocusViewSegment for ReviewManager
+    const mapToReviewSegment = useCallback((segment: SegmentItem): FocusViewSegment => {
+        const cleanAudioUrl = cleanPath ? getArtifactUrl(cleanPath.replace('.wav', `_${segment.index}.wav`)) : undefined;
+        const originalAudioUrl = originalPath ? getArtifactUrl(originalPath.replace('.wav', `_${segment.index}.wav`)) : undefined;
+
+        return {
+            index: segment.index,
+            start: segment.start,
+            end: segment.end,
+            duration: segment.duration,
+            text: `Segment ${segment.index}`, // Could be transcription text if available
+            confidence: segment.quality ? segment.quality * 10 : undefined,
+            snrDb: segment.snrDb ?? undefined,
+            speechRatio: segment.speechRatio ? segment.speechRatio * 100 : undefined,
+            kept: segment.kept ?? null,
+            rejectReason: segment.rejectReason,
+            cleanAudioUrl,
+            originalAudioUrl,
+            // Original metrics would be stored separately if available
+            originalSnrDb: undefined,
+            originalConfidence: undefined,
+            originalSpeechRatio: undefined,
+        };
+    }, [cleanPath, originalPath, getArtifactUrl]);
+
+    // Handler for segment updates from ReviewManager
+    const handleSegmentUpdate = useCallback((index: number, updates: Partial<FocusViewSegment>) => {
+        setSegments(prev => prev.map(seg => {
+            if (seg.index !== index) return seg;
+
+            const updated: SegmentItem = { ...seg };
+            if (updates.kept !== undefined) updated.kept = updates.kept;
+            if (updates.text !== undefined) {
+                // Text updates would be saved as notes or transcript edits
+            }
+            if (updates.rejectReason !== undefined) updated.rejectReason = updates.rejectReason;
+
+            return updated;
+        }));
+
+        // Update votes state
+        if (updates.kept === true) {
+            setVotes(prev => ({ ...prev, [index]: 'accept' }));
+        } else if (updates.kept === false) {
+            setVotes(prev => ({ ...prev, [index]: 'reject' }));
+        } else if (updates.kept === null) {
+            // Remove vote
+            setVotes(prev => {
+                const next = { ...prev };
+                delete next[index];
+                return next;
+            });
+        }
+    }, []);
+
+    // Handler for segment actions from ReviewManager
+    const handleSegmentAction = useCallback((index: number, action: 'accept' | 'reject' | 'skip') => {
+        if (action === 'accept') {
+            setDecision(index, 'accept');
+        } else if (action === 'reject') {
+            setDecision(index, 'reject');
+        }
+        // Skip doesn't change state, just navigation
+    }, [setDecision]);
 
     const moveNext = useCallback(() => {
         if (!activeSegment) return;
@@ -904,628 +605,774 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
         return 'badge badge-bad';
     };
 
+    const handleRunSelect = useCallback((run: VodRun) => {
+        console.log('[RunSelector] Selected run:', run.run_id);
+        // Reload segments for the selected run
+        // This would require backend support for loading specific run segments
+        // For now, just log it
+    }, []);
+
+    const handleSegmentClick = useCallback((segmentIndex: number) => {
+        setActiveId(segmentIndex);
+        const segment = segments.find(s => s.index === segmentIndex);
+        if (segment) {
+            playClean(segment);
+        }
+    }, [segments]);
+
     return (
         <div className="manual-review-page p-6 grid-bg">
-            <div className="max-w-6xl mx-auto space-y-6">
-                <div className="glass rounded-2xl p-6">
-                    <h1 className="text-3xl font-semibold text-white">Manual Review</h1>
-                    <p className="text-slate-400 mt-2">
-                        Approve or reject sanitized segments. Keyboard: Enter = accept, Space = reject/next, A = prev, D = next.
-                    </p>
-                </div>
-
-                <div className="glass rounded-2xl p-4 review-toolbar">
-                    <div className="review-summary">
-                        <div className="text-sm text-slate-300">
-                            Total: {summary.total} | Accepted: {summary.accepted} | Rejected: {summary.rejected} | Remaining: {summary.remaining}
-                        </div>
-                        <div className="text-xs text-slate-500">Reviewed: {summary.percent}%</div>
-                        {reviewMeta?.updatedAt && (
-                            <div className="text-xs text-slate-500">Last saved: {reviewMeta.updatedAt}</div>
-                        )}
-                        {totalSegments > 0 && (
-                            <div className="text-xs text-slate-500">
-                                Showing {pageOffset + 1}-{Math.min(pageOffset + pageLimit, totalSegments)} of {totalSegments}
-                            </div>
-                        )}
-                    </div>
-                    <div className="review-actions">
-                        <button
-                            type="button"
-                            onClick={handleLoad}
-                            className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg"
-                        >
-                            Load Latest
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => fetchSegments(Math.max(0, pageOffset - pageLimit), pageLimit)}
-                            disabled={pageOffset === 0 || loading}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Previous
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => fetchSegments(pageOffset + pageLimit, pageLimit)}
-                            disabled={!hasMore || loading}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Load more
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleSave}
-                            disabled={saving || segments.length === 0}
-                            className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            {saving ? 'Saving...' : 'Save Review'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleExport}
-                            disabled={saving || acceptedList.length === 0}
-                            className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Export Accepted
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleDownloadReview}
-                            className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            Download JSON
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleUndo}
-                            disabled={history.length === 0}
-                            className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Undo
-                        </button>
-                    </div>
-                </div>
-
-                <div className="glass rounded-2xl p-3 review-toolbar">
-                    <div className="review-actions">
-                        <button
-                            type="button"
-                            onClick={() => setShowTimeline((prev) => !prev)}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            {showTimeline ? 'Hide timeline' : 'Show timeline'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setShowTrays((prev) => !prev)}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            {showTrays ? 'Hide trays' : 'Show trays'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setPerfMode((prev) => !prev)}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            {perfMode ? 'Performance mode: ON' : 'Performance mode: OFF'}
-                        </button>
-                    </div>
-                </div>
-
-                {error && (
-                    <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-sm text-rose-200">
-                        {error}
-                    </div>
-                )}
-
-                {playbackMessage && (
-                    <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200">
-                        {playbackMessage}
-                    </div>
-                )}
-
-                {sanitizeSuggestion && (
-                    <div className="glass rounded-2xl p-4 review-suggest">
-                        <div className="review-section-header">
-                            <h3 className="text-sm font-semibold text-white">{sanitizeSuggestion.title}</h3>
-                            <span className="text-xs text-slate-500">Suggestion</span>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-2">
-                            {sanitizeSuggestion.reason}
-                        </p>
-                        <div className="text-xs text-slate-500 mt-2">
-                            Proposed: {sanitizeSuggestion.settings.preset}, strictness {sanitizeSuggestion.settings.strictness},
-                            UVR {sanitizeSuggestion.settings.extractVocals ? 'ON' : 'OFF'}
-                        </div>
-                        <div className="review-actions mt-3">
-                            <button
-                                type="button"
-                                onClick={runSuggestedSanitize}
-                                disabled={suggestionRunning}
-                                className="primary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                            >
-                                {suggestionRunning ? 'Running sanitize...' : 'Run suggested sanitize'}
-                            </button>
-                            {suggestionMessage && (
-                                <span className="text-xs text-slate-400">{suggestionMessage}</span>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {segments.length > 0 && totalDuration > 0 && showTimeline && !perfMode && (
-                    <div className="glass rounded-2xl p-4 review-timeline">
-                        <div className="review-section-header">
-                            <h3 className="text-sm font-semibold text-white">Timeline</h3>
-                            <span className="text-xs text-slate-500">{formatTime(totalDuration)} total</span>
-                        </div>
-                        <div className="review-timeline-track">
-                            {timelineSegments.map((item) => (
-                                <button
-                                    key={`timeline-${item.index}`}
-                                    type="button"
-                                    className={`review-timeline-item ${item.decision}`}
-                                    style={{ left: `${item.left}%`, width: `${item.width}%` }}
-                                    onClick={() => setActiveId(item.index)}
-                                    aria-label={`Segment ${item.index}`}
-                                />
-                            ))}
-                            {activeSegment && (
-                                <div
-                                    className="review-timeline-cursor"
-                                    style={{ left: `${(activeSegment.start / totalDuration) * 100}%` }}
-                                />
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                <div className="glass rounded-2xl p-4 review-player">
-                    <div className="review-player-header">
+            <div className="max-w-full mx-auto">
+                <div className="glass rounded-2xl p-6 mb-6">
+                    <div className="flex items-center justify-between">
                         <div>
-                            <h2 className="text-lg font-semibold text-white">Segment Player</h2>
-                            <p className="text-xs text-slate-400">
-                                {activeSegment
-                                    ? `#${activeSegment.index} ${formatTime(activeSegment.start)} - ${formatTime(activeSegment.end)}`
-                                    : 'Select a segment to preview'}
+                            <h1 className="text-3xl font-semibold text-white">Manual Review</h1>
+                            <p className="text-slate-400 mt-2">
+                                Approve or reject sanitized segments. Keyboard: Enter = accept, Space = reject/next, A = prev, D = next.
                             </p>
                         </div>
-                        <div className="review-player-controls">
-                            <label className="review-toggle">
-                                <input
-                                    type="checkbox"
-                                    checked={compactMode}
-                                    onChange={(event) => setCompactMode(event.target.checked)}
+                        <div className="flex items-center gap-3">
+                            {vodUrl && (
+                                <RunSelector
+                                    vodUrl={vodUrl}
+                                    onRunSelect={handleRunSelect}
                                 />
-                                Compact
-                            </label>
-                        </div>
-                    </div>
-
-                    <div className="review-player-body">
-                        <div className="review-player-main">
-                            <div className="review-player-buttons">
-                                <button
-                                    type="button"
-                                    onClick={() => playClean()}
-                                    disabled={!activeSegment || (!cleanPath && !originalPath)}
-                                    className="primary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                                    title={activeSegment && !cleanOffsets.has(activeSegment.index) ? 'Clean audio unavailable - will play original' : 'Play segment audio'}
-                                >
-                                    {playingId === activeSegment?.index && playbackSource === 'clean'
-                                        ? 'PLAYING SEGMENT...'
-                                        : activeSegment && !cleanOffsets.has(activeSegment.index)
-                                            ? 'PLAY SEGMENT (→original)'
-                                            : 'PLAY SEGMENT'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => playOriginal()}
-                                    disabled={!activeSegment || !originalPath}
-                                    className="secondary-btn review-original-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                                >
-                                    {playingId === activeSegment?.index && playbackSource === 'original'
-                                        ? 'PLAYING ORIGINAL...'
-                                        : 'PLAY ORIGINAL'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={acceptActive}
-                                    disabled={!activeSegment}
-                                    className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                                >
-                                    Accept
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={rejectActive}
-                                    disabled={!activeSegment}
-                                    className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                                >
-                                    Reject
-                                </button>
-                            </div>
-                            <div className="review-scrub">
-                                <div className="review-scrub-labels">
-                                    <span>{activeSegment ? formatTime(activeSegment.start) : '--'}</span>
-                                    <span>{activeSegment ? formatTime(activeSegment.end) : '--'}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min={0}
-                                    max={100}
-                                    value={scrubValue}
-                                    onChange={(event) => handleScrub(Number(event.target.value))}
-                                    disabled={!activeSegment || !cleanPath}
-                                />
-                            </div>
-                            <audio ref={audioRef} className="audio-player" controls preload="metadata">
-                                {audioSrc && <source src={audioSrc} type="audio/wav" />}
-                            </audio>
-                        </div>
-                        <div className="review-player-settings">
-                            <div className="review-field">
-                                <label className="text-xs text-slate-400">Note</label>
-                                <textarea
-                                    rows={2}
-                                    value={activeSegment ? notes[activeSegment.index] || '' : ''}
-                                    onChange={(event) =>
-                                        activeSegment &&
-                                        setNotes((prev) => ({ ...prev, [activeSegment.index]: event.target.value }))
-                                    }
-                                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                                />
-                            </div>
-                            <div className="review-field mt-3">
-                                <label className="text-xs text-slate-400 flex items-center justify-between">
-                                    <span>Live Transcript (SRT)</span>
-                                    {transcribing && <span className="text-amber-400 animate-pulse">Transcribing...</span>}
-                                </label>
-                                <div className="mt-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white min-h-[60px] max-h-[120px] overflow-y-auto">
-                                    {transcriptWords.length > 0 ? (
-                                        <div className="leading-relaxed">
-                                            {transcriptWords.map((word, idx) => (
-                                                <span
-                                                    key={idx}
-                                                    className={idx === currentWordIndex ? 'text-amber-300 font-bold bg-amber-500/20 px-0.5 rounded' : 'text-slate-300'}
-                                                >
-                                                    {word.word}{' '}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="text-slate-500 italic">
-                                            {transcribing ? 'Waiting for transcription...' : 'Play segment to see live transcription'}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setShowChatFeed(!showChatFeed)}
+                                className="secondary-btn px-4 py-2 text-sm font-semibold rounded-lg"
+                            >
+                                {showChatFeed ? 'Hide Chat' : 'Show Chat'}
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <div className="glass rounded-2xl p-4 review-toolbar">
-                    <div className="review-filters">
-                        <div className="review-field">
-                            <label className="text-xs text-slate-400">Filter</label>
-                            <select
-                                value={filterMode}
-                                onChange={(event) => setFilterMode(event.target.value)}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                            >
-                                <option value="all">All</option>
-                                <option value="low-snr">Low SNR</option>
-                                <option value="low-speech">Low speech ratio</option>
-                                <option value="short">Short clips</option>
-                                <option value="labeled">Labeled</option>
-                            </select>
-                        </div>
-                        <div className="review-field">
-                            <label className="text-xs text-slate-400">Sort</label>
-                            <select
-                                value={sortMode}
-                                onChange={(event) => setSortMode(event.target.value)}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                            >
-                                <option value="start">Start time</option>
-                                <option value="duration">Duration</option>
-                                <option value="snr">SNR</option>
-                                <option value="speech">Speech ratio</option>
-                            </select>
-                        </div>
-                        <div className="review-field">
-                            <label className="text-xs text-slate-400">Auto-reject SNR</label>
-                            <input
-                                type="number"
-                                min={0}
-                                max={30}
-                                step={0.5}
-                                value={autoRejectSnr}
-                                onChange={(event) => setAutoRejectSnr(Number(event.target.value))}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                            />
-                        </div>
-                        <div className="review-field">
-                            <label className="text-xs text-slate-400">Auto-reject speech</label>
-                            <input
-                                type="number"
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                value={autoRejectSpeech}
-                                onChange={(event) => setAutoRejectSpeech(Number(event.target.value))}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                            />
-                        </div>
-                        <div className="review-field">
-                            <label className="text-xs text-slate-400">Auto-reject duration</label>
-                            <input
-                                type="number"
-                                min={0}
-                                max={5}
-                                step={0.1}
-                                value={autoRejectDuration}
-                                onChange={(event) => setAutoRejectDuration(Number(event.target.value))}
-                                className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
-                            />
-                        </div>
-                    </div>
-                    <div className="review-actions">
-                        <button
-                            type="button"
-                            onClick={() => handleBatchDecision('accept')}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            Accept Selected
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => handleBatchDecision('reject')}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            Reject Selected
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleAutoReject}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                        >
-                            Auto-reject
-                        </button>
-                    </div>
+                <div className="flex gap-6">
+                    {/* Main content area */}
+<div className={`space-y-6 ${showChatFeed ? 'flex-[3]' : 'max-w-6xl mx-auto'}`}>
+
+    <div className="glass rounded-2xl p-4 review-toolbar">
+        <div className="review-summary">
+            <div className="text-sm text-slate-300">
+                Total: {summary.total} | Accepted: {summary.accepted} | Rejected: {summary.rejected} | Remaining: {summary.remaining}
+            </div>
+            <div className="text-xs text-slate-500">Reviewed: {summary.percent}%</div>
+            {reviewMeta?.updatedAt && (
+                <div className="text-xs text-slate-500">Last saved: {reviewMeta.updatedAt}</div>
+            )}
+            {totalSegments > 0 && (
+                <div className="text-xs text-slate-500">
+                    Showing {pageOffset + 1}-{Math.min(pageOffset + pageLimit, totalSegments)} of {totalSegments}
                 </div>
+            )}
+        </div>
+        <div className="review-actions">
+            <button
+                type="button"
+                onClick={handleLoad}
+                className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg"
+            >
+                Load Latest
+            </button>
+            <button
+                type="button"
+                onClick={() => fetchSegments(Math.max(0, pageOffset - pageLimit), pageLimit)}
+                disabled={pageOffset === 0 || loading}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+            >
+                Previous
+            </button>
+            <button
+                type="button"
+                onClick={() => fetchSegments(pageOffset + pageLimit, pageLimit)}
+                disabled={!hasMore || loading}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+            >
+                Load more
+            </button>
+            <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || segments.length === 0}
+                className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60"
+            >
+                {saving ? 'Saving...' : 'Save Review'}
+            </button>
+            <button
+                type="button"
+                onClick={handleExport}
+                disabled={saving || acceptedList.length === 0}
+                className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+            >
+                Export Accepted
+            </button>
+            <button
+                type="button"
+                onClick={handleDownloadReview}
+                className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg"
+            >
+                Download JSON
+            </button>
+            <button
+                type="button"
+                onClick={handleUndo}
+                disabled={history.length === 0}
+                className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+            >
+                Undo
+            </button>
+        </div>
+    </div>
 
-                {loading ? (
-                    <div className="text-sm text-slate-400">Loading segments...</div>
-                ) : segments.length === 0 ? (
-                    <div className="glass rounded-2xl p-4 text-sm text-slate-400">
-                        No segments loaded yet. Run Sanitize in the wizard, then click Load Latest.
-                    </div>
-                ) : (
-                    <div className="review-layout">
-                        <div className="review-inbox glass rounded-2xl p-4">
-                            <div className="review-section-header">
-                                <h3 className="text-sm font-semibold text-white">Inbox</h3>
-                                <span className="text-xs text-slate-500">{filteredInbox.length} pending</span>
-                            </div>
-                            <div
-                                ref={listRef}
-                                className={compactMode || perfMode ? 'review-list compact' : 'review-list'}
-                                onScroll={handleListScroll}
-                            >
-                                <div style={{ height: totalItems * itemHeight, position: 'relative' }}>
-                                    <div style={{ transform: `translateY(${topSpacer}px)` }}>
-                                        {visibleItems.map((segment) => (
-                                            <div
-                                                key={segment.index}
-                                                className={`review-card ${activeId === segment.index ? 'active' : ''}`}
-                                                onClick={() => setActiveId(segment.index)}
-                                            >
-                                                <div className="review-card-head">
-                                                    <label className="review-checkbox">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={Boolean(selected[segment.index])}
-                                                            onChange={(event) =>
-                                                                setSelected((prev) => ({
-                                                                    ...prev,
-                                                                    [segment.index]: event.target.checked,
-                                                                }))
-                                                            }
-                                                        />
-                                                        <span>#{segment.index}</span>
-                                                    </label>
-                                                    <div className="review-card-meta">
-                                                        <span>{formatTime(segment.start)} - {formatTime(segment.end)}</span>
-                                                        <span>{formatTime(segment.duration)}</span>
-                                                    </div>
-                                                </div>
-                                                {!perfMode && (
-                                                    <div className="review-badges">
-                                                        <span className={badgeClass(segment.snrDb ?? null, 10, 6)}>
-                                                            SNR {segment.snrDb?.toFixed?.(1) ?? 'n/a'}
-                                                        </span>
-                                                        <span className={badgeClass(segment.speechRatio ?? null, 0.7, 0.5)}>
-                                                            Speech {segment.speechRatio?.toFixed?.(2) ?? 'n/a'}
-                                                        </span>
-                                                        <span className={badgeClass(segment.quality ?? null, 7, 5)}>
-                                                            Quality {segment.quality ?? 'n/a'}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                {!perfMode && (segment.labels.length > 0 || segment.rejectReason.length > 0) && (
-                                                    <div className="review-tags">
-                                                        {segment.labels.map((label) => (
-                                                            <span key={label} className="tag">{label}</span>
-                                                        ))}
-                                                        {segment.rejectReason.map((reason) => (
-                                                            <span key={reason} className="tag tag-warn">{reason}</span>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                                {totalDuration > 0 && !perfMode && (
-                                                    <div className="review-mini">
-                                                        <div className="review-mini-track">
-                                                            <div
-                                                                className="review-mini-fill"
-                                                                style={{
-                                                                    left: `${(segment.start / totalDuration) * 100}%`,
-                                                                    width: `${Math.max(2, ((segment.end - segment.start) / totalDuration) * 100)}%`,
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                <div className="review-card-actions">
-                                                    <button
-                                                        type="button"
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setActiveId(segment.index);
-                                                            playClean(segment);
-                                                        }}
-                                                        className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                                                    >
-                                                        Play
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setDecision(segment.index, 'accept');
-                                                        }}
-                                                        className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                                                    >
-                                                        Accept
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            setDecision(segment.index, 'reject');
-                                                        }}
-                                                        className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                                                    >
-                                                        Reject
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div style={{ height: bottomSpacer }} />
-                                </div>
-                            </div>
-                        </div>
+    <div className="glass rounded-2xl p-3 review-toolbar">
+        <div className="review-actions">
+            <button
+                type="button"
+                onClick={() => setShowWaveform((prev) => !prev)}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                {showWaveform ? 'Hide Waveform' : 'Show Waveform'}
+            </button>
+            <button
+                type="button"
+                onClick={() => setShowTimeline((prev) => !prev)}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                {showTimeline ? 'Hide timeline' : 'Show timeline'}
+            </button>
+            <button
+                type="button"
+                onClick={() => setPerfMode((prev) => !prev)}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                {perfMode ? 'Performance mode: ON' : 'Performance mode: OFF'}
+            </button>
+        </div>
+    </div>
 
-                        {showTrays && !perfMode && (
-                            <div className="review-trays">
-                                <div className="review-tray glass rounded-2xl p-4">
-                                    <div className="review-section-header">
-                                        <h3 className="text-sm font-semibold text-white">Accepted</h3>
-                                        <span className="text-xs text-slate-500">{acceptedList.length}</span>
-                                    </div>
-                                    <div className="review-tray-list">
-                                        {acceptedList.map((segment) => (
-                                            <div key={segment.index} className="review-tray-item">
-                                                <div>
-                                                    <div className="text-xs text-slate-300">#{segment.index}</div>
-                                                    <div className="text-xs text-slate-500">{formatTime(segment.duration)}</div>
-                                                </div>
-                                                <div className="review-tray-actions">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setActiveId(segment.index);
-                                                            playClean(segment);
-                                                        }}
-                                                        className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
-                                                    >
-                                                        Play
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => restoreDecision(segment.index)}
-                                                        className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
-                                                    >
-                                                        Restore
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
+    {error && (
+        <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-sm text-rose-200">
+            {error}
+        </div>
+    )}
 
-                                <div className="review-tray glass rounded-2xl p-4">
-                                    <div className="review-section-header">
-                                        <h3 className="text-sm font-semibold text-white">Rejected</h3>
-                                        <span className="text-xs text-slate-500">{rejectedList.length}</span>
-                                    </div>
-                                    <div className="review-tray-list">
-                                        {rejectedList.map((segment) => (
-                                            <div key={segment.index} className="review-tray-item">
-                                                <div>
-                                                    <div className="text-xs text-slate-300">#{segment.index}</div>
-                                                    <div className="text-xs text-slate-500">{formatTime(segment.duration)}</div>
-                                                </div>
-                                                <div className="review-tray-actions">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => playSegment(segment)}
-                                                        className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
-                                                    >
-                                                        Play
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => restoreDecision(segment.index)}
-                                                        className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
-                                                    >
-                                                        Restore
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-                {activeSegment && (
-                    <div className="review-sticky-player">
-                        <div>
-                            <div className="text-xs text-slate-200">Active #{activeSegment.index}</div>
-                            <div className="text-[10px] text-slate-500">
-                                {formatTime(activeSegment.start)} - {formatTime(activeSegment.end)}
-                            </div>
-                        </div>
-                        <div className="review-sticky-actions">
-                            <button
-                                type="button"
-                                onClick={togglePlay}
-                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                            >
-                                {playingId === activeSegment.index ? 'Pause' : 'Play'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setPlaybackSource(playbackSource === 'clean' ? 'original' : 'clean')}
-                                disabled={!originalPath}
-                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-                            >
-                                {playbackSource === 'clean' ? 'A/B' : 'A/B'}
-                            </button>
-                        </div>
-                    </div>
+    {playbackMessage && (
+        <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200">
+            {playbackMessage}
+        </div>
+    )}
+
+    {sanitizeSuggestion && (
+        <div className="glass rounded-2xl p-4 review-suggest">
+            <div className="review-section-header">
+                <h3 className="text-sm font-semibold text-white">{sanitizeSuggestion.title}</h3>
+                <span className="text-xs text-slate-500">Suggestion</span>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+                {sanitizeSuggestion.reason}
+            </p>
+            <div className="text-xs text-slate-500 mt-2">
+                Proposed: {sanitizeSuggestion.settings.preset}, strictness {sanitizeSuggestion.settings.strictness},
+                UVR {sanitizeSuggestion.settings.extractVocals ? 'ON' : 'OFF'}
+            </div>
+            <div className="review-actions mt-3">
+                <button
+                    type="button"
+                    onClick={runSuggestedSanitize}
+                    disabled={suggestionRunning}
+                    className="primary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                >
+                    {suggestionRunning ? 'Running sanitize...' : 'Run suggested sanitize'}
+                </button>
+                {suggestionMessage && (
+                    <span className="text-xs text-slate-400">{suggestionMessage}</span>
                 )}
             </div>
         </div>
+    )}
+
+    {/* Waveform visualization */}
+    {showWaveform && (cleanPath || originalPath) && (
+        <div className="glass rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-4">
+                <div>
+                    <h3 className="text-base font-semibold text-white mb-1">Audio Waveform</h3>
+                    <p className="text-xs text-slate-400">Click segments to navigate</p>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${waveformSource === 'clean'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                            }`}
+                        onClick={() => setWaveformSource('clean')}
+                        disabled={!cleanPath}
+                    >
+                        Clean
+                    </button>
+                    <button
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${waveformSource === 'original'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                            }`}
+                        onClick={() => setWaveformSource('original')}
+                        disabled={!originalPath}
+                    >
+                        Original
+                    </button>
+                </div>
+            </div>
+            <Waveform
+                audioUrl={getArtifactUrl(waveformSource === 'clean' ? cleanPath || '' : originalPath || '')}
+                segments={waveformSegments}
+                activeSegment={activeId}
+                onSegmentClick={(index) => {
+                    const segment = segments.find(s => s.index === index);
+                    if (segment) {
+                        setActiveId(index);
+                        playClean(segment);
+                    }
+                }}
+                height={120}
+            />
+        </div>
+    )}
+
+    {segments.length > 0 && totalDuration > 0 && showTimeline && !perfMode && (
+        <div className="glass rounded-2xl p-4 review-timeline">
+            <div className="review-section-header">
+                <h3 className="text-sm font-semibold text-white">Timeline</h3>
+                <span className="text-xs text-slate-500">{formatTime(totalDuration)} total</span>
+            </div>
+            <div className="review-timeline-track">
+                {timelineSegments.map((item) => (
+                    <button
+                        key={`timeline-${item.index}`}
+                        type="button"
+                        className={`review-timeline-item ${item.decision}`}
+                        style={{ left: `${item.left}%`, width: `${item.width}%` }}
+                        onClick={() => setActiveId(item.index)}
+                        aria-label={`Segment ${item.index}`}
+                    />
+                ))}
+                {activeSegment && (
+                    <div
+                        className="review-timeline-cursor"
+                        style={{ left: `${(activeSegment.start / totalDuration) * 100}%` }}
+                    />
+                )}
+            </div>
+        </div>
+    )}
+
+    <div className="glass rounded-2xl p-4 review-player">
+        <div className="review-player-header">
+            <div>
+                <h2 className="text-lg font-semibold text-white">Segment Player</h2>
+                <p className="text-xs text-slate-400">
+                    {activeSegment
+                        ? `#${activeSegment.index} ${formatTime(activeSegment.start)} - ${formatTime(activeSegment.end)}`
+                        : 'Select a segment to preview'}
+                </p>
+            </div>
+            <div className="review-player-controls">
+                <label className="review-toggle">
+                    <input
+                        type="checkbox"
+                        checked={compactMode}
+                        onChange={(event) => setCompactMode(event.target.checked)}
+                    />
+                    Compact
+                </label>
+            </div>
+        </div>
+
+        <div className="review-player-body">
+            <div className="review-player-main">
+                <div className="review-player-buttons">
+                    <button
+                        type="button"
+                        onClick={() => playClean()}
+                        disabled={!activeSegment || (!cleanPath && !originalPath)}
+                        className="primary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                        title={activeSegment && !cleanOffsets.has(activeSegment.index) ? 'Clean audio unavailable - will play original' : 'Play segment audio'}
+                    >
+                        {playingId === activeSegment?.index && playbackSource === 'clean'
+                            ? 'PLAYING SEGMENT...'
+                            : activeSegment && !cleanOffsets.has(activeSegment.index)
+                                ? 'PLAY SEGMENT (→original)'
+                                : 'PLAY SEGMENT'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => playOriginal()}
+                        disabled={!activeSegment || !originalPath}
+                        className="secondary-btn review-original-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                    >
+                        {playingId === activeSegment?.index && playbackSource === 'original'
+                            ? 'PLAYING ORIGINAL...'
+                            : 'PLAY ORIGINAL'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={acceptActive}
+                        disabled={!activeSegment}
+                        className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                    >
+                        Accept
+                    </button>
+                    <button
+                        type="button"
+                        onClick={rejectActive}
+                        disabled={!activeSegment}
+                        className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                    >
+                        Reject
+                    </button>
+                </div>
+                <div className="review-scrub">
+                    <div className="review-scrub-labels">
+                        <span>{activeSegment ? formatTime(activeSegment.start) : '--'}</span>
+                        <span>{activeSegment ? formatTime(activeSegment.end) : '--'}</span>
+                    </div>
+                    <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={scrubValue}
+                        onChange={(event) => handleScrub(Number(event.target.value))}
+                        disabled={!activeSegment || !cleanPath}
+                    />
+                </div>
+                <audio ref={audioRef} className="audio-player" controls preload="metadata">
+                    {audioSrc && <source src={audioSrc} type="audio/wav" />}
+                </audio>
+            </div>
+            <div className="review-player-settings">
+                <div className="review-field">
+                    <label className="text-xs text-slate-400">Note</label>
+                    <textarea
+                        rows={2}
+                        value={activeSegment ? notes[activeSegment.index] || '' : ''}
+                        onChange={(event) =>
+                            activeSegment &&
+                            setNotes((prev) => ({ ...prev, [activeSegment.index]: event.target.value }))
+                        }
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                    />
+                </div>
+                <div className="review-field mt-3">
+                    <label className="text-xs text-slate-400 flex items-center justify-between">
+                        <span>Live Transcript (SRT)</span>
+                        {transcribing && <span className="text-amber-400 animate-pulse">Transcribing...</span>}
+                    </label>
+                    <div className="mt-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white min-h-[60px] max-h-[120px] overflow-y-auto">
+                        {transcriptWords.length > 0 ? (
+                            <div className="leading-relaxed">
+                                {transcriptWords.map((word, idx) => (
+                                    <span
+                                        key={idx}
+                                        className={idx === currentWordIndex ? 'text-amber-300 font-bold bg-amber-500/20 px-0.5 rounded' : 'text-slate-300'}
+                                    >
+                                        {word.word}{' '}
+                                    </span>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-slate-500 italic">
+                                {transcribing ? 'Waiting for transcription...' : 'Play segment to see live transcription'}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div className="glass rounded-2xl p-4 review-toolbar">
+        <div className="review-filters">
+            <div className="review-field">
+                <label className="text-xs text-slate-400">Filter</label>
+                <select
+                    value={filterMode}
+                    onChange={(event) => setFilterMode(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                >
+                    <option value="all">All</option>
+                    <option value="low-snr">Low SNR</option>
+                    <option value="low-speech">Low speech ratio</option>
+                    <option value="short">Short clips</option>
+                    <option value="labeled">Labeled</option>
+                </select>
+            </div>
+            <div className="review-field">
+                <label className="text-xs text-slate-400">Sort</label>
+                <select
+                    value={sortMode}
+                    onChange={(event) => setSortMode(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                >
+                    <option value="start">Start time</option>
+                    <option value="duration">Duration</option>
+                    <option value="snr">SNR</option>
+                    <option value="speech">Speech ratio</option>
+                </select>
+            </div>
+            <div className="review-field">
+                <label className="text-xs text-slate-400">Auto-reject SNR</label>
+                <input
+                    type="number"
+                    min={0}
+                    max={30}
+                    step={0.5}
+                    value={autoRejectSnr}
+                    onChange={(event) => setAutoRejectSnr(Number(event.target.value))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                />
+            </div>
+            <div className="review-field">
+                <label className="text-xs text-slate-400">Auto-reject speech</label>
+                <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={autoRejectSpeech}
+                    onChange={(event) => setAutoRejectSpeech(Number(event.target.value))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                />
+            </div>
+            <div className="review-field">
+                <label className="text-xs text-slate-400">Auto-reject duration</label>
+                <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={autoRejectDuration}
+                    onChange={(event) => setAutoRejectDuration(Number(event.target.value))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-xs text-white"
+                />
+            </div>
+        </div>
+        <div className="review-actions">
+            <button
+                type="button"
+                onClick={() => handleBatchDecision('accept')}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                Accept Selected
+            </button>
+            <button
+                type="button"
+                onClick={() => handleBatchDecision('reject')}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                Reject Selected
+            </button>
+            <button
+                type="button"
+                onClick={handleAutoReject}
+                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+            >
+                Auto-reject
+            </button>
+        </div>
+    </div>
+
+    {loading ? (
+        <div className="text-sm text-slate-400">Loading segments...</div>
+    ) : segments.length === 0 ? (
+        <div className="glass rounded-2xl p-4 text-sm text-slate-400">
+            No segments loaded yet. Run Sanitize in the wizard, then click Load Latest.
+        </div>
+    ) : (
+        <div className="review-layout">
+            {/* New Review System */}
+            <ReviewManager
+                segments={segments.map(mapToReviewSegment)}
+                onSegmentUpdate={handleSegmentUpdate}
+                onSegmentAction={handleSegmentAction}
+            />
+
+            {/* Old inbox kept for reference (commented out) */}
+            {false && (
+                <div className="review-layout-old">
+                    <div className="review-inbox glass rounded-2xl p-4">
+                        <div className="review-section-header">
+                            <h3 className="text-sm font-semibold text-white">Inbox</h3>
+                            <span className="text-xs text-slate-500">{filteredInbox.length} pending</span>
+                        </div>
+                        <div
+                            ref={listRef}
+                            className={compactMode || perfMode ? 'review-list compact' : 'review-list'}
+                            onScroll={handleListScroll}
+                        >
+                            <div style={{ height: totalItems * itemHeight, position: 'relative' }}>
+                                <div style={{ transform: `translateY(${topSpacer}px)` }}>
+                                    {visibleItems.map((segment) => (
+                                        <div
+                                            key={segment.index}
+                                            className={`review-card ${activeId === segment.index ? 'active' : ''}`}
+                                            onClick={() => setActiveId(segment.index)}
+                                        >
+                                            <div className="review-card-head">
+                                                <label className="review-checkbox">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={Boolean(selected[segment.index])}
+                                                        onChange={(event) =>
+                                                            setSelected((prev) => ({
+                                                                ...prev,
+                                                                [segment.index]: event.target.checked,
+                                                            }))
+                                                        }
+                                                    />
+                                                    <span>#{segment.index}</span>
+                                                </label>
+                                                <div className="review-card-meta">
+                                                    <span>{formatTime(segment.start)} - {formatTime(segment.end)}</span>
+                                                    <span>{formatTime(segment.duration)}</span>
+                                                </div>
+                                            </div>
+                                            {!perfMode && (
+                                                <div className="review-badges">
+                                                    <span className={badgeClass(segment.snrDb ?? null, 10, 6)}>
+                                                        SNR {segment.snrDb?.toFixed?.(1) ?? 'n/a'}
+                                                    </span>
+                                                    <span className={badgeClass(segment.speechRatio ?? null, 0.7, 0.5)}>
+                                                        Speech {segment.speechRatio?.toFixed?.(2) ?? 'n/a'}
+                                                    </span>
+                                                    <span className={badgeClass(segment.quality ?? null, 7, 5)}>
+                                                        Quality {segment.quality ?? 'n/a'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {!perfMode && (segment.labels.length > 0 || segment.rejectReason.length > 0) && (
+                                                <div className="review-tags">
+                                                    {segment.labels.map((label) => (
+                                                        <span key={label} className="tag">{label}</span>
+                                                    ))}
+                                                    {segment.rejectReason.map((reason) => (
+                                                        <span key={reason} className="tag tag-warn">{reason}</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {totalDuration > 0 && !perfMode && (
+                                                <div className="review-mini">
+                                                    <div className="review-mini-track">
+                                                        <div
+                                                            className="review-mini-fill"
+                                                            style={{
+                                                                left: `${(segment.start / totalDuration) * 100}%`,
+                                                                width: `${Math.max(2, ((segment.end - segment.start) / totalDuration) * 100)}%`,
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <div className="review-card-actions">
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setActiveId(segment.index);
+                                                        playClean(segment);
+                                                    }}
+                                                    className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+                                                >
+                                                    Play
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setDecision(segment.index, 'accept');
+                                                    }}
+                                                    className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+                                                >
+                                                    Accept
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        setDecision(segment.index, 'reject');
+                                                    }}
+                                                    className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+                                                >
+                                                    Reject
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div style={{ height: bottomSpacer }} />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* End old inbox */}
+
+            {showTrays && !perfMode && (
+                <div className="review-trays">
+                    <div className="review-tray glass rounded-2xl p-4">
+                        <div className="review-section-header">
+                            <h3 className="text-sm font-semibold text-white">Accepted</h3>
+                            <span className="text-xs text-slate-500">{acceptedList.length}</span>
+                        </div>
+                        <div className="review-tray-list">
+                            {acceptedList.map((segment) => (
+                                <div key={segment.index} className="review-tray-item">
+                                    <div>
+                                        <div className="text-xs text-slate-300">#{segment.index}</div>
+                                        <div className="text-xs text-slate-500">{formatTime(segment.duration)}</div>
+                                    </div>
+                                    <div className="review-tray-actions">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setActiveId(segment.index);
+                                                playClean(segment);
+                                            }}
+                                            className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
+                                        >
+                                            Play
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => restoreDecision(segment.index)}
+                                            className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
+                                        >
+                                            Restore
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="review-tray glass rounded-2xl p-4">
+                        <div className="review-section-header">
+                            <h3 className="text-sm font-semibold text-white">Rejected</h3>
+                            <span className="text-xs text-slate-500">{rejectedList.length}</span>
+                        </div>
+                        <div className="review-tray-list">
+                            {rejectedList.map((segment) => (
+                                <div key={segment.index} className="review-tray-item">
+                                    <div>
+                                        <div className="text-xs text-slate-300">#{segment.index}</div>
+                                        <div className="text-xs text-slate-500">{formatTime(segment.duration)}</div>
+                                    </div>
+                                    <div className="review-tray-actions">
+                                        <button
+                                            type="button"
+                                            onClick={() => playSegment(segment)}
+                                            className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
+                                        >
+                                            Play
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => restoreDecision(segment.index)}
+                                            className="secondary-btn px-2 py-1 text-[11px] font-semibold rounded-lg"
+                                        >
+                                            Restore
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    )}
+    {activeSegment && (
+        <div className="review-sticky-player">
+            <div>
+                <div className="text-xs text-slate-200">Active #{activeSegment.index}</div>
+                <div className="text-[10px] text-slate-500">
+                    {formatTime(activeSegment.start)} - {formatTime(activeSegment.end)}
+                </div>
+            </div>
+            <div className="review-sticky-actions">
+                <button
+                    type="button"
+                    onClick={togglePlay}
+                    className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+                >
+                    {playingId === activeSegment.index ? 'Pause' : 'Play'}
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setPlaybackSource(playbackSource === 'clean' ? 'original' : 'clean')}
+                    disabled={!originalPath}
+                    className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
+                >
+                    {playbackSource === 'clean' ? 'A/B' : 'A/B'}
+                </button>
+            </div>
+        </div>
+    )}
+</div>
+
+{/* Chat feed panel - Telegram style */ }
+{
+    showChatFeed && (
+        <div className="flex-[2] flex flex-col">
+            <div className="bg-[#0e1621] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/10" style={{ height: 'calc(100vh - 180px)' }}>
+                {/* Chat header */}
+                <div className="bg-gradient-to-r from-[#1a2332] to-[#1e2939] px-6 py-4 border-b border-white/10 flex items-center gap-3">
+                    {transcriptionFeedStore.avatarUrl ? (
+                        <img
+                            src={transcriptionFeedStore.avatarUrl}
+                            alt="Streamer"
+                            className="w-10 h-10 rounded-full border-2 border-blue-400"
+                        />
+                    ) : (
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+                            {streamerName?.charAt(0).toUpperCase() || 'S'}
+                        </div>
+                    )}
+                    <div className="flex-1">
+                        <h2 className="text-lg font-semibold text-white">
+                            {streamerName || 'Transcriptions'}
+                        </h2>
+                        <p className="text-xs text-slate-400">
+                            {transcriptionFeedStore.getSegmentsList().length} messages
+                        </p>
+                    </div>
+                </div>
+
+                {/* Chat messages */}
+                <TranscriptionFeed
+                    segments={transcriptionFeedStore.getSegmentsList()}
+                    avatarUrl={transcriptionFeedStore.avatarUrl}
+                    onSegmentClick={handleSegmentClick}
+                    autoScroll={true}
+                />
+            </div>
+        </div>
+    )
+}
+                </div >
+            </div >
+        </div >
     );
 };
 
 export const ManualReviewPage: React.FC<ManualReviewPageProps> = ({ vodUrlOverride }) => {
     const [searchParams] = useSearchParams();
-    const vodUrl = vodUrlOverride || searchParams.get('vodUrl') || '';
+    let vodUrl = vodUrlOverride || searchParams.get('vodUrl') || '';
+
+    // Dev mode: 'dev' translates to the development VOD
+    if (vodUrl.toLowerCase() === 'dev') {
+        vodUrl = 'https://www.twitch.tv/videos/2453173157';
+    }
+
     return <ManualReviewPanel vodUrl={vodUrl} />;
 };

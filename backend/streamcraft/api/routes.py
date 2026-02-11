@@ -359,6 +359,7 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
                         cfg,
                         event_cb=event_cb,
                         should_cancel=cancel_event.is_set if cancel_event else None,
+                        run_id=request.runId,
                     )
                     try:
                         payload = serialize_result(result)
@@ -412,6 +413,7 @@ async def run_sanitize(request: RunSanitizeRequest) -> RunSanitizeResponse:
             dataset_root,
             cfg,
             should_cancel=cancel_event.is_set if cancel_event else None,
+            run_id=request.runId,
         )
 
         payload = serialize_result(result)

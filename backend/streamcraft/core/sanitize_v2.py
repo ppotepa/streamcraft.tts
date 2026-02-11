@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -25,7 +26,10 @@ import soundfile as sf
 import webrtcvad
 import re
 
-from streamcraft.core.pipeline import resolve_output_dirs
+from streamcraft.core.pipeline import resolve_output_dirs, generate_run_id
+from streamcraft.core.run_manager import (
+    RunMetadata, RunParams, RunStats, RunStatus, save_run_metadata
+)
 from streamcraft.core.sanitize import _apply_fade, _clamp, _resample_linear, _to_mono
 import subprocess
 import sys
@@ -743,8 +747,32 @@ def run_sanitise_v2(
     cfg: SanitiseConfig,
     event_cb: Optional[Callable[[dict], None]] = None,
 	should_cancel: Optional[Callable[[], bool]] = None,
+	run_id: Optional[str] = None,
 ) -> SanitiseResult:
+	"""
+	Run sanitization with optional versioned run tracking.
+	
+	Args:
+		vod_url: VOD URL or local path
+		out_root: Base output directory
+		dataset_root: Base dataset directory
+		cfg: Sanitization configuration
+		event_cb: Optional callback for streaming events
+		should_cancel: Optional callback to check for cancellation
+		run_id: Optional run identifier. If None, generates one automatically.
+		          If set to False explicitly, uses legacy flat structure (no versioning).
+	
+	Returns:
+		SanitiseResult with paths and diagnostics
+	"""
 	log: List[str] = []
+	
+	# Generate run_id if not provided (unless explicitly disabled)
+	if run_id is None:
+		run_id = generate_run_id()
+	
+	# Use None for resolve_output_dirs if run_id is False (legacy mode)
+	resolve_run_id = None if run_id is False else run_id
 
 	def send(evt: dict) -> None:
 		if event_cb:
@@ -762,7 +790,7 @@ def run_sanitise_v2(
 			emit(f"[cancel] requested during {stage}")
 			raise RuntimeError("Sanitize canceled by user")
 
-	_, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
+	streamer, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root, run_id=resolve_run_id)
 	vod_slug = vod_dir.name
 	input_audio = vod_dir / f"{vod_slug}_full.wav"
 	clean_path = vod_dir / f"{vod_slug}_clean.wav"
@@ -879,6 +907,61 @@ def run_sanitise_v2(
 			chunk = audio[start_idx:end_idx]
 			sf.write(str(vs_dir / Path(vs["path"]).name), chunk, sr)
 		emit(f"[voice] saved {len(voice_samples)} sample(s) -> {vs_dir}")
+
+	# Save run metadata (if using versioned structure)
+	if run_id is not False:
+		total_duration = sum(s.end - s.start for s in segments)
+		clean_duration = sum(s.end - s.start for s in segments if s.kept)
+		
+		# Count rejection reasons
+		reject_reasons = {}
+		for s in segments:
+			for reason in s.reject_reason:
+				reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+		
+		# Extract vod identifier from URL
+		try:
+			from streamcraft.core.pipeline import describe_vod
+			_, vod_identifier = describe_vod(vod_url)
+		except Exception:
+			vod_identifier = None
+		
+		metadata = RunMetadata(
+			run_id=run_id or "default",
+			created_at=datetime.utcnow().isoformat(),
+			vod_url=vod_url,
+			streamer=streamer,
+			vod_identifier=vod_identifier,
+			status=RunStatus.COMPLETED,
+			params=RunParams(
+				mode=cfg.mode.value,
+				preset=cfg.preset.value,
+				strictness=cfg.strictness,
+				extract_vocals=cfg.extract_vocals,
+				preserve_pauses=cfg.preserve_pauses,
+				reduce_sfx=cfg.reduce_sfx,
+				target_lufs=cfg.target_lufs,
+				true_peak_limit_db=cfg.true_peak_limit_db,
+				fade_ms=cfg.fade_ms,
+				voice_sample_count=cfg.voice_sample_count if cfg.mode == SanitiseMode.VOICE else None,
+				voice_sample_min_duration=cfg.voice_sample_min_duration if cfg.mode == SanitiseMode.VOICE else None,
+				voice_sample_max_duration=cfg.voice_sample_max_duration if cfg.mode == SanitiseMode.VOICE else None,
+				voice_sample_min_rms_db=cfg.voice_sample_min_rms_db if cfg.mode == SanitiseMode.VOICE else None,
+			),
+			stats=RunStats(
+				total_segments=len(segments),
+				kept_segments=sum(1 for s in segments if s.kept),
+				total_duration=total_duration,
+				clean_duration=clean_duration,
+				rejection_reasons=reject_reasons if reject_reasons else None,
+			),
+			segments_manifest=manifest_path.name,
+			clean_audio=clean_path.name,
+			completed_at=datetime.utcnow().isoformat(),
+		)
+		
+		save_run_metadata(dataset_dir, metadata)
+		emit(f"[metadata] saved run metadata -> {dataset_dir / 'run_metadata.json'}")
 
 	return SanitiseResult(
 		clean_path=clean_path,

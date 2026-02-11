@@ -16,6 +16,30 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
+function Stop-StreamcraftPythonProcesses {
+    Write-Host "`n🧹 Cleaning up existing Python processes..." -ForegroundColor Yellow
+    
+    # Find all python.exe processes running uvicorn or streamcraft
+    $pythonProcs = Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object {
+        $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+        $cmdLine -and ($cmdLine -like "*uvicorn*" -or $cmdLine -like "*streamcraft*")
+    }
+    
+    if ($pythonProcs) {
+        $pythonProcs | ForEach-Object {
+            Write-Host "  Stopping Python process (PID $($_.Id))" -ForegroundColor Gray
+            try {
+                Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Host "  ⚠️  Could not stop PID $($_.Id)`: $($_)" -ForegroundColor DarkYellow
+            }
+        }
+        # Give processes time to clean up
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 function Stop-ProcessOnPort {
     param(
         [int]$Port,
@@ -68,6 +92,9 @@ Write-Host "  Backend:  http://$BackendHost`:$BackendPort" -ForegroundColor Gray
 Write-Host "  Frontend: http://localhost:$FrontendPort" -ForegroundColor Gray
 Write-Host "  API Docs: http://$BackendHost`:$BackendPort/docs" -ForegroundColor Gray
 Write-Host ""
+
+# Clean up any lingering Python processes first
+Stop-StreamcraftPythonProcesses
 
 # Stop any existing servers bound to our dev ports
 Stop-ProcessOnPort -Port $BackendPort -Label "backend (python/uvicorn)"
