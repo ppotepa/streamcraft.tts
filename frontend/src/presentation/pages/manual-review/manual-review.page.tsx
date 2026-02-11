@@ -726,32 +726,6 @@
         </div>
     </div>
 
-    <div className="glass rounded-2xl p-3 review-toolbar">
-        <div className="review-actions">
-            <button
-                type="button"
-                onClick={() => setShowWaveform((prev) => !prev)}
-                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-            >
-                {showWaveform ? 'Hide Waveform' : 'Show Waveform'}
-            </button>
-            <button
-                type="button"
-                onClick={() => setShowTimeline((prev) => !prev)}
-                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-            >
-                {showTimeline ? 'Hide timeline' : 'Show timeline'}
-            </button>
-            <button
-                type="button"
-                onClick={() => setPerfMode((prev) => !prev)}
-                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg"
-            >
-                {perfMode ? 'Performance mode: ON' : 'Performance mode: OFF'}
-            </button>
-        </div>
-    </div>
-
     {error && (
         <div className="p-3 rounded-lg border border-rose-500/30 bg-rose-500/10 text-sm text-rose-200">
             {error}
@@ -788,80 +762,6 @@
                 </button>
                 {suggestionMessage && (
                     <span className="text-xs text-slate-400">{suggestionMessage}</span>
-                )}
-            </div>
-        </div>
-    )}
-
-    {/* Waveform visualization */}
-    {showWaveform && (cleanPath || originalPath) && (
-        <div className="glass rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-4">
-                <div>
-                    <h3 className="text-base font-semibold text-white mb-1">Audio Waveform</h3>
-                    <p className="text-xs text-slate-400">Click segments to navigate</p>
-                </div>
-                <div className="flex gap-2">
-                    <button
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${waveformSource === 'clean'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white/5 text-slate-300 hover:bg-white/10'
-                            }`}
-                        onClick={() => setWaveformSource('clean')}
-                        disabled={!cleanPath}
-                    >
-                        Clean
-                    </button>
-                    <button
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${waveformSource === 'original'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white/5 text-slate-300 hover:bg-white/10'
-                            }`}
-                        onClick={() => setWaveformSource('original')}
-                        disabled={!originalPath}
-                    >
-                        Original
-                    </button>
-                </div>
-            </div>
-            <Waveform
-                audioUrl={getArtifactUrl(waveformSource === 'clean' ? cleanPath || '' : originalPath || '')}
-                segments={waveformSegments}
-                activeSegment={activeId}
-                onSegmentClick={(index) => {
-                    const segment = segments.find(s => s.index === index);
-                    if (segment) {
-                        setActiveId(index);
-                        playClean(segment);
-                    }
-                }}
-                height={120}
-            />
-        </div>
-    )}
-
-    {segments.length > 0 && totalDuration > 0 && showTimeline && !perfMode && (
-        <div className="glass rounded-2xl p-4 review-timeline">
-            <div className="review-section-header">
-                <h3 className="text-sm font-semibold text-white">Timeline</h3>
-                <span className="text-xs text-slate-500">{formatTime(totalDuration)} total</span>
-            </div>
-            <div className="review-timeline-track">
-                {timelineSegments.map((item) => (
-                    <button
-                        key={`timeline-${item.index}`}
-                        type="button"
-                        className={`review-timeline-item ${item.decision}`}
-                        style={{ left: `${item.left}%`, width: `${item.width}%` }}
-                        onClick={() => setActiveId(item.index)}
-                        aria-label={`Segment ${item.index}`}
-                    />
-                ))}
-                {activeSegment && (
-                    <div
-                        className="review-timeline-cursor"
-                        style={{ left: `${(activeSegment.start / totalDuration) * 100}%` }}
-                    />
                 )}
             </div>
         </div>
