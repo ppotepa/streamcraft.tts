@@ -1,0 +1,258 @@
+Type: Task (UX/UI Refactor)
+Module: Manual Review
+Components: ReviewManager, TableView, TimelineView, FocusView
+Priority: High
+Status: To Do
+
+🎯 Cel
+
+Celem zadania jest uporządkowanie i ujednolicenie doświadczenia użytkownika w module Manual Review poprzez:
+
+zmianę architektury wyświetlania widoków (Timeline jako modal),
+
+poprawę animacji i interakcji w Timeline View,
+
+ujednolicenie logiki akceptacji/odrzucenia,
+
+poprawę wizualnej hierarchii informacji,
+
+urealnienie waveformu,
+
+uproszczenie prezentacji danych liczbowych,
+
+naprawę niedziałających akcji (Play, Edit).
+
+Refactor ma zwiększyć spójność UX, czytelność oraz przewidywalność zachowania interfejsu.
+
+🏗 Zakres zmian
+1️⃣ Zmiana architektury widoków (ReviewManager.tsx)
+
+Aktualny stan:
+
+Widok przełączany przez viewMode: 'table' | 'timeline'
+
+Toggle między Table i Timeline
+
+Docelowy stan:
+
+TableView zawsze renderowany jako widok bazowy
+
+TimelineView wyświetlany jako pełnoekranowy modal (overlay)
+
+Usunięcie toggle oraz przycisku przełączania widoków
+
+Wprowadzenie isTimelineOpen: boolean
+
+Zamknięcie Timeline → powrót do TableView bez przeładowania kontekstu
+
+Plik:
+frontend/src/presentation/components/review/ReviewManager.tsx
+
+2️⃣ Timeline View jako pełnoekranowy overlay
+
+Timeline powinien:
+
+działać jako modal (analogicznie do FocusView)
+
+zajmować 100% viewportu
+
+mieć backdrop + zamykanie kliknięciem poza kartą
+
+blokować interakcję z TableView w tle
+
+Pliki:
+
+TimelineView.tsx
+
+CSS (review-views.css)
+
+3️⃣ Poprawa animacji przesuwania segmentów
+
+Aktualny stan:
+
+prev/active/next karty
+
+brak realistycznego efektu przesunięcia
+
+Docelowe zachowanie:
+
+wyraźna animacja “jeden segment w lewo/prawo”
+
+efekt przypominający slider / slot machine
+
+płynne przejście (CSS transition lub controlled state animation)
+
+zmiana activeId dopiero po zakończeniu animacji
+
+Plik:
+
+TimelineView.tsx
+
+4️⃣ Ujednolicenie akcji: Play / Edit / Accept / Reject
+Play
+
+Obecnie brak realnego podpięcia audio
+
+Należy podłączyć do właściwego playera
+
+Klik w Timeline → odtwarza segment
+
+Edit
+
+Aktualnie otwiera FocusView (placeholder)
+
+Sprawdzić layering / styl modala
+
+Upewnić się, że UX jest logiczny
+
+Accept / Reject
+
+Aktualnie logika działa, ale brak wizualnej spójności
+
+Należy ujednolicić efekt wizualny w obu widokach
+
+Plik:
+
+ReviewManager.tsx
+
+TimelineView.tsx
+
+TableView.tsx
+
+5️⃣ Spójny system kolorów (zielony / czerwony tint)
+
+Założenie:
+
+✔ Accept → delikatny zielony tint
+
+✖ Reject → delikatny czerwony tint
+
+Identyczne kolory w obu widokach
+
+Zmiany:
+
+W TableView.tsx:
+
+dodać klasy:
+
+row-kept
+
+row-rejected
+
+W TimelineView.tsx:
+
+dodać klasy:
+
+card-kept
+
+card-rejected
+
+Kolory muszą być zdefiniowane centralnie (jedno źródło w CSS).
+
+6️⃣ Uproszczenie precyzji danych (speechRatio)
+
+Problem:
+
+Wyświetlane zbyt wiele miejsc po przecinku
+
+Docelowo:
+
+Ograniczyć do 0–1 miejsca po przecinku (toFixed(0) / toFixed(1))
+
+Zastosować spójną logikę formatowania w:
+
+TableView
+
+TimelineView
+
+FocusView
+
+7️⃣ Poprawa hierarchii wizualnej informacji
+
+Należy:
+
+zwiększyć font-size dla kluczowych danych (czas trwania, status)
+
+zmniejszyć znaczenie informacji drugorzędnych
+
+uporządkować spacing
+
+poprawić czytelność kart Timeline
+
+Dotyczy:
+
+TimelineView.tsx
+
+TableView.tsx
+
+FocusView.tsx
+
+8️⃣ Urealnienie waveform
+
+Aktualny stan:
+
+FocusView używa statycznego placeholdera
+
+Timeline generuje mini-waveform z AudioContext
+
+Docelowo:
+
+wykorzystać realny waveform pipeline w FocusView
+
+waveform powinien:
+
+zajmować pełną szerokość kontenera
+
+wyglądać realistycznie
+
+nie być losowym placeholderem
+
+Pliki:
+
+TimelineView.tsx (refactor logic)
+
+FocusView.tsx
+
+✅ Kryteria akceptacji
+
+ TableView jest zawsze widoczny jako baza
+
+ TimelineView działa jako pełnoekranowy modal
+
+ Toggle widoków został usunięty
+
+ Animacja przesuwania segmentów jest płynna i jednoznaczna
+
+ Play odtwarza właściwy segment
+
+ Edit działa przewidywalnie
+
+ Accept/Reject zmienia kolor w obu widokach identycznie
+
+ Speech ratio ma ograniczoną precyzję
+
+ Waveform w FocusView jest realistyczny
+
+ UI posiada czytelną hierarchię wizualną
+
+📦 Zakres techniczny
+
+Zmiany obejmują wyłącznie warstwę prezentacyjną (frontend).
+Brak zmian w backend API.
+Brak zmian w modelu danych.
+
+📌 Efekt końcowy
+
+Manual Review powinien:
+
+być spójny wizualnie,
+
+mieć przewidywalne interakcje,
+
+posiadać czytelną hierarchię danych,
+
+oferować realistyczny waveform,
+
+eliminować niespójności między Table i Timeline,
+
+być gotowy do dalszego rozwoju (kolejny etap: refactor playera).

@@ -3,6 +3,7 @@ import json
 import math
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -168,6 +169,14 @@ def run_dataset(
     if use_demucs:
         source_audio = run_demucs(input_audio, out_dir)
 
+    source_duration: Optional[float] = None
+    try:
+        source_duration = float(sf.info(str(source_audio)).duration)
+        if not math.isfinite(source_duration) or source_duration <= 0:
+            source_duration = None
+    except Exception:
+        source_duration = None
+
     cues = parse_srt(srt_path)
     if not cues:
         raise RuntimeError("No cues parsed from SRT")
@@ -201,44 +210,138 @@ def run_dataset(
         else:
             final_segments.append(Cue(start, end, cue.text))
 
+    total_segments = len(final_segments)
+    if total_segments == 0:
+        log_warn("[progress] 15% No segments after SRT normalization")
+    else:
+        log(f"[progress] 15% Prepared {total_segments} segment(s) for slicing")
+
     rows = []
     exported = []
+    skipped_out_of_bounds = 0
+    skipped_ffmpeg = 0
+
+    jobs = []
     for idx, seg in enumerate(final_segments, 1):
         clip_id = clip_offset + idx
         clip_path = clips_dir / f"{clip_id:06d}.wav"
         clip_aac_path = clips_dir / f"{clip_id:06d}.m4a" if clip_aac else None
 
-        if not force:
-            if clip_path.exists() or (clip_aac_path and clip_aac_path.exists()):
-                log_warn(f"Clip exists, skipping: {clip_path.name}")
-                continue
+        segment_start = max(0.0, float(seg.start))
+        segment_end = max(segment_start, float(seg.end))
+        if source_duration is not None:
+            segment_start = min(segment_start, source_duration)
+            segment_end = min(segment_end, source_duration)
 
-        try:
-            slice_clip_pcm(source_audio, seg.start, seg.end, clip_path)
-            if clip_aac_path:
-                slice_clip_aac(source_audio, seg.start, seg.end, clip_aac_path, clip_aac_bitrate)
-        except subprocess.CalledProcessError as exc:
-            clip_path.unlink(missing_ok=True)
-            if clip_aac_path:
-                clip_aac_path.unlink(missing_ok=True)
-            raise exc
+        if segment_end - segment_start < 0.05:
+            skipped_out_of_bounds += 1
+            log_warn(
+                f"Skipping segment outside audio bounds or too short: "
+                f"start={seg.start:.3f} end={seg.end:.3f} adjusted={segment_start:.3f}-{segment_end:.3f}"
+            )
+            continue
 
-        if min_rms_db is not None:
-            level = rms_db(clip_path)
-            if level < min_rms_db:
-                log_warn(f"Dropping clip {clip_path.name} RMS {level:.1f} dB < {min_rms_db}")
+        if not force and (clip_path.exists() or (clip_aac_path and clip_aac_path.exists())):
+            log_warn(f"Clip exists, skipping: {clip_path.name}")
+            continue
+
+        jobs.append({
+            "segment": seg,
+            "clip_path": clip_path,
+            "clip_aac_path": clip_aac_path,
+            "segment_start": segment_start,
+            "segment_end": segment_end,
+        })
+
+    total_jobs = len(jobs)
+    if total_jobs == 0:
+        log_warn("[progress] 25% No valid segments to slice")
+    else:
+        max_workers = max(1, int(threads) if threads else 1)
+        report_every = max(1, total_jobs // 20)
+        log(f"[i] Slicing with workers={max_workers} jobs={total_jobs}")
+
+        def _run_slice(job: dict):
+            seg = job["segment"]
+            clip_path: Path = job["clip_path"]
+            clip_aac_path: Optional[Path] = job["clip_aac_path"]
+            segment_start = float(job["segment_start"])
+            segment_end = float(job["segment_end"])
+
+            try:
+                slice_clip_pcm(source_audio, segment_start, segment_end, clip_path)
+                if clip_aac_path:
+                    slice_clip_aac(source_audio, segment_start, segment_end, clip_aac_path, clip_aac_bitrate)
+
+                if min_rms_db is not None:
+                    level = rms_db(clip_path)
+                    if level < min_rms_db:
+                        clip_path.unlink(missing_ok=True)
+                        if clip_aac_path:
+                            clip_aac_path.unlink(missing_ok=True)
+                        return {
+                            "ok": False,
+                            "reason": "rms",
+                            "clip": clip_path.name,
+                            "level": level,
+                        }
+
+                return {
+                    "ok": True,
+                    "segment_start": segment_start,
+                    "segment_end": segment_end,
+                    "text": seg.text,
+                    "clip": clip_path.name,
+                    "clip_aac": clip_aac_path.name if clip_aac_path and clip_aac_path.exists() else None,
+                }
+            except subprocess.CalledProcessError as exc:
                 clip_path.unlink(missing_ok=True)
                 if clip_aac_path:
                     clip_aac_path.unlink(missing_ok=True)
-                continue
-        rows.append([clip_path.name, f"{seg.start:.3f}", f"{seg.end:.3f}", seg.text])
-        exported.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text,
-            "clip": clip_path.name,
-            "clip_aac": clip_aac_path.name if clip_aac_path and clip_aac_path.exists() else None,
-        })
+                return {
+                    "ok": False,
+                    "reason": "ffmpeg",
+                    "clip": clip_path.name,
+                    "code": exc.returncode,
+                    "start": segment_start,
+                    "end": segment_end,
+                }
+
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_run_slice, job) for job in jobs]
+            for future in as_completed(futures):
+                completed += 1
+                result = future.result()
+
+                if result.get("ok"):
+                    rows.append([
+                        result["clip"],
+                        f"{result['segment_start']:.3f}",
+                        f"{result['segment_end']:.3f}",
+                        result["text"],
+                    ])
+                    exported.append({
+                        "start": result["segment_start"],
+                        "end": result["segment_end"],
+                        "text": result["text"],
+                        "clip": result["clip"],
+                        "clip_aac": result["clip_aac"],
+                    })
+                else:
+                    reason = result.get("reason")
+                    if reason == "ffmpeg":
+                        skipped_ffmpeg += 1
+                        log_warn(
+                            f"Skipping segment after ffmpeg error (clip={result.get('clip')}, "
+                            f"start={result.get('start'):.3f}, end={result.get('end'):.3f}, code={result.get('code')})"
+                        )
+                    elif reason == "rms":
+                        log_warn(f"Dropping clip {result.get('clip')} RMS {result.get('level'):.1f} dB < {min_rms_db}")
+
+                if completed % report_every == 0 or completed == total_jobs:
+                    pct = 15 + int((completed / total_jobs) * 50)
+                    log(f"[progress] {pct}% Slicing clips {completed}/{total_jobs} (exported={len(rows)})")
 
     if rows:
         write_header = not manifest_path.exists() or manifest_path.stat().st_size == 0
@@ -256,6 +359,10 @@ def run_dataset(
             existing_segments = []
     existing_segments.extend(exported)
     segments_path.write_text(json.dumps(existing_segments, indent=2), encoding="utf-8")
+    log(
+        f"[progress] 68% Slicing summary exported={len(rows)} "
+        f"skipped_bounds={skipped_out_of_bounds} skipped_ffmpeg={skipped_ffmpeg}"
+    )
     log_ok(f"Exported {len(rows)} new clips to {clips_dir}")
     return {
         "manifest": str(manifest_path),

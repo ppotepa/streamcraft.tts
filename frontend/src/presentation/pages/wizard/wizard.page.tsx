@@ -4,9 +4,12 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ManualReviewPage } from '../manual-review/manual-review.page';
 import { VodSearch, VodMetadataCard } from '../../features/vod-management';
 import { useDependencies } from '../../context/dependency-context';
+import { useAudioPlayer } from '../../context/audio-player.context';
+import { useToast } from '../../shared/toast';
 import { useFetchVodMetadata } from '../../shared/hooks/use-fetch-vod-metadata';
 import { parseVodUrl } from '../../../domain/vod/utils/parse-vod-url';
 import { config } from '../../../config';
@@ -46,6 +49,16 @@ type LegacyJob = {
     updatedAt: string;
     steps: LegacyJobSteps;
     outputs?: LegacyJobOutputs | null;
+};
+
+type DatasetRecord = {
+    datasetId: string;
+    streamer: string;
+    runId?: string | null;
+    datasetPath?: string | null;
+    clipsCount?: number;
+    hasTrainArtifacts?: boolean;
+    createdAt?: string | null;
 };
 
 type RunKey = 'extract' | 'sanitize' | 'srt' | 'train' | 'tts';
@@ -108,6 +121,16 @@ export const WizardPage: React.FC = () => {
         execute: fetchMetadata,
         reset: resetMetadata,
     } = useFetchVodMetadata(fetchMetadataHandler);
+    const { showToast, removeToast } = useToast();
+    const {
+        src: globalAudioSrc,
+        currentTime: globalAudioTime,
+        duration: globalAudioDuration,
+        isPlaying: globalAudioPlaying,
+        playSegment,
+        toggle,
+        seek,
+    } = useAudioPlayer();
 
     const [vodUrl, setVodUrl] = useState('');
     const [vodInput, setVodInput] = useState('');
@@ -119,6 +142,14 @@ export const WizardPage: React.FC = () => {
     const [sanitizePreset, setSanitizePreset] = useState<'strict' | 'balanced' | 'lenient' | 'rapid' | 'performance'>('balanced');
     const [sanitizeStrictness, setSanitizeStrictness] = useState(0.5);
     const [sanitizeExtractVocals, setSanitizeExtractVocals] = useState(false);
+    const [srtSpeed, setSrtSpeed] = useState<'accurate' | 'balanced' | 'fast'>('balanced');
+    const [srtAcceptedOnly, setSrtAcceptedOnly] = useState(true);
+    const [ttsSourceMode, setTtsSourceMode] = useState<'all_streamer' | 'target_dataset'>('all_streamer');
+    const [ttsTargetDatasetPath, setTtsTargetDatasetPath] = useState<string>('');
+    const [ttsQualityPreset, setTtsQualityPreset] = useState<'fast' | 'balanced' | 'best'>('balanced');
+    const [ttsAcceptedOnly, setTtsAcceptedOnly] = useState(false);
+    const [ttsDatasets, setTtsDatasets] = useState<DatasetRecord[]>([]);
+    const [ttsDatasetsLoading, setTtsDatasetsLoading] = useState(false);
     const [ttsText, setTtsText] = useState('Sample line for TTS.');
 
     const [extractState, setExtractState] = useState<RunState>({ status: 'idle' });
@@ -128,7 +159,10 @@ export const WizardPage: React.FC = () => {
     const [ttsState, setTtsState] = useState<RunState>({ status: 'idle' });
     const [sanitizeProgress, setSanitizeProgress] = useState<number | null>(null);
     const [extractProgress, setExtractProgress] = useState<number | null>(null);
+    const [srtProgress, setSrtProgress] = useState<number | null>(null);
+    const [trainProgress, setTrainProgress] = useState<number | null>(null);
     const [suggestionRunning, setSuggestionRunning] = useState(false);
+    const [searchParams] = useSearchParams();
 
     // Review preferences with localStorage persistence
     const [reviewPerfMode, setReviewPerfMode] = useState(() => {
@@ -167,6 +201,17 @@ export const WizardPage: React.FC = () => {
     useEffect(() => {
         localStorage.setItem('reviewShowTrays', String(reviewShowTrays));
     }, [reviewShowTrays]);
+
+    useEffect(() => {
+        if (!reviewOpen) {
+            return;
+        }
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = previousOverflow;
+        };
+    }, [reviewOpen]);
     const [legacyJob, setLegacyJob] = useState<LegacyJob | null>(null);
     const [legacyJobError, setLegacyJobError] = useState<string | null>(null);
     const [legacyJobLoading, setLegacyJobLoading] = useState(false);
@@ -193,8 +238,6 @@ export const WizardPage: React.FC = () => {
     const compareCleanRef = useRef<HTMLCanvasElement | null>(null);
     const compareShellRef = useRef<HTMLDivElement | null>(null);
     const compareCursorRef = useRef<HTMLDivElement | null>(null);
-    const abPreviewRef = useRef(false);
-    const abTimerRef = useRef<number | null>(null);
     const extractLogRef = useRef<HTMLDivElement | null>(null);
     const sanitizeLogRef = useRef<HTMLDivElement | null>(null);
     const srtLogRef = useRef<HTMLDivElement | null>(null);
@@ -217,6 +260,7 @@ export const WizardPage: React.FC = () => {
         train: false,
         tts: false,
     });
+    const runningToastIdsRef = useRef<Set<string>>(new Set());
 
     const legacyRequest = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
         const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
@@ -241,11 +285,6 @@ export const WizardPage: React.FC = () => {
         [legacyRequest]
     );
 
-    const legacyPostNoBody = useCallback(
-        async <T,>(path: string): Promise<T> => legacyRequest(path, { method: 'POST' }),
-        [legacyRequest]
-    );
-
     const legacyGet = useCallback(async <T,>(path: string): Promise<T> => legacyRequest(path), [legacyRequest]);
 
     const legacyPut = useCallback(
@@ -260,11 +299,11 @@ export const WizardPage: React.FC = () => {
     );
 
     const parseProgressFromLog = useCallback((line: string): number | null => {
-        const match = line.match(/(\d{1,3})%/);
+        const match = line.match(/(\d{1,3}(?:\.\d+)?)%/);
         if (!match) return null;
         const value = Number(match[1]);
         if (!Number.isFinite(value) || value < 0 || value > 100) return null;
-        return value;
+        return Math.round(value);
     }, []);
 
     const appendLog = useCallback((prev: string[] | undefined, line: string): string[] => {
@@ -280,6 +319,9 @@ export const WizardPage: React.FC = () => {
         setTrainState({ status: 'idle' });
         setTtsState({ status: 'idle' });
         setSanitizeProgress(null);
+        setExtractProgress(null);
+        setSrtProgress(null);
+        setTrainProgress(null);
         setAudioPath(null);
         setCleanPath(null);
         setSrtPath(null);
@@ -329,6 +371,7 @@ export const WizardPage: React.FC = () => {
                 ? { status: 'done', message: 'SRT generated', outputPath: outputs.srtPath ?? undefined }
                 : { status: 'idle' }
         );
+        setSrtProgress(job.steps.srt ? 100 : null);
         setTrainState(
             job.steps.train
                 ? { status: 'done', message: 'Dataset ready', outputPath: outputs.datasetPath ?? undefined }
@@ -345,6 +388,42 @@ export const WizardPage: React.FC = () => {
         const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
         return `${baseUrl}/legacy/artifact?path=${encodeURIComponent(path)}`;
     }, []);
+
+    const extractedPreviewSrc = useMemo(() => (audioPath ? getArtifactUrl(audioPath) : null), [audioPath, getArtifactUrl]);
+    const sanitizedPreviewSrc = useMemo(() => (cleanPath ? getArtifactUrl(cleanPath) : null), [cleanPath, getArtifactUrl]);
+    const sanitizePlaylist = useMemo(() => {
+        const items: Array<{ id: number; src: string; label: string }> = [];
+        if (extractedPreviewSrc) {
+            items.push({ id: 1, src: extractedPreviewSrc, label: 'Sanitize: Original preview' });
+        }
+        if (sanitizedPreviewSrc) {
+            items.push({ id: 2, src: sanitizedPreviewSrc, label: 'Sanitize: Sanitized preview' });
+        }
+        return items;
+    }, [extractedPreviewSrc, sanitizedPreviewSrc]);
+
+    const formatAudioTime = useCallback((seconds: number) => {
+        if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }, []);
+
+    const ensureGlobalPreviewSource = useCallback(async (
+        source: string | null,
+        startAt?: number,
+        autoplay = true
+    ) => {
+        if (!source) return;
+        const segmentId = source === sanitizedPreviewSrc ? 2 : 1;
+        await playSegment({
+            context: 'sanitize',
+            playlist: sanitizePlaylist,
+            segmentId,
+            autoplay,
+            startAt: Number.isFinite(startAt as number) ? startAt : undefined,
+        });
+    }, [playSegment, sanitizePlaylist, sanitizedPreviewSrc]);
 
     const renderWaveform = useCallback(
         async (
@@ -456,65 +535,55 @@ export const WizardPage: React.FC = () => {
         let frameId = 0;
 
         const updateCursor = (
-            audio: HTMLAudioElement | null,
+            source: string | null,
             shell: HTMLDivElement | null,
             cursor: HTMLDivElement | null
         ) => {
-            if (!audio || !shell || !cursor) return;
-            const duration = audio.duration || 0;
-            const ratio = duration > 0 ? audio.currentTime / duration : 0;
+            if (!source || !shell || !cursor) return;
+            const isActive = globalAudioSrc === source;
+            const duration = isActive ? globalAudioDuration : 0;
+            const current = isActive ? globalAudioTime : 0;
+            const ratio = duration > 0 ? current / duration : 0;
             const width = shell.clientWidth || 1;
             cursor.style.transform = `translateX(${Math.max(0, Math.min(width, ratio * width))}px)`;
         };
 
         const tick = () => {
-            updateCursor(audioRef.current, waveformShellRef.current, cursorRef.current);
-            updateCursor(cleanAudioRef.current, cleanWaveformShellRef.current, cleanCursorRef.current);
-            updateCursor(cleanAudioRef.current, compareShellRef.current, compareCursorRef.current);
+            updateCursor(extractedPreviewSrc, waveformShellRef.current, cursorRef.current);
+            updateCursor(sanitizedPreviewSrc, cleanWaveformShellRef.current, cleanCursorRef.current);
+            updateCursor(sanitizedPreviewSrc, compareShellRef.current, compareCursorRef.current);
             frameId = requestAnimationFrame(tick);
         };
 
         frameId = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(frameId);
-    }, [waveformReady, cleanWaveformReady]);
+    }, [waveformReady, cleanWaveformReady, extractedPreviewSrc, sanitizedPreviewSrc, globalAudioSrc, globalAudioDuration, globalAudioTime]);
 
     const handleWaveformSeek = (
         event: React.MouseEvent<HTMLDivElement>,
-        audio: HTMLAudioElement | null,
+        source: string | null,
         shell: HTMLDivElement | null
     ): void => {
-        if (!audio || !shell) return;
+        if (!source || !shell) return;
         const rect = shell.getBoundingClientRect();
         const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-        if (audio.duration && Number.isFinite(audio.duration)) {
-            audio.currentTime = audio.duration * ratio;
+        const baseDuration = globalAudioSrc === source ? globalAudioDuration : 0;
+        const targetTime = baseDuration > 0 ? baseDuration * ratio : 0;
+        if (globalAudioSrc !== source) {
+            void ensureGlobalPreviewSource(source, targetTime, true);
+            return;
         }
+        seek(targetTime);
     };
 
-    const handleSanitizedPlay = async (): Promise<void> => {
-        if (!compareEnabled || abPreviewRef.current) return;
-        const cleanAudio = cleanAudioRef.current;
-        const originalAudio = audioRef.current;
-        if (!cleanAudio || !originalAudio) return;
-        abPreviewRef.current = true;
-        const startTime = cleanAudio.currentTime || 0;
-        try {
-            cleanAudio.pause();
-            originalAudio.currentTime = startTime;
-            await originalAudio.play();
-            if (abTimerRef.current) {
-                window.clearTimeout(abTimerRef.current);
-            }
-            abTimerRef.current = window.setTimeout(async () => {
-                originalAudio.pause();
-                cleanAudio.currentTime = startTime;
-                await cleanAudio.play();
-                abPreviewRef.current = false;
-            }, 2000);
-        } catch {
-            abPreviewRef.current = false;
+    const handlePreviewToggle = useCallback((source: string | null) => {
+        if (!source) return;
+        if (globalAudioSrc !== source) {
+            void ensureGlobalPreviewSource(source, 0, true);
+            return;
         }
-    };
+        void toggle();
+    }, [globalAudioSrc, ensureGlobalPreviewSource, toggle]);
 
     const loadLegacyJob = useCallback(
         async (url: string) => {
@@ -643,6 +712,77 @@ export const WizardPage: React.FC = () => {
     useEffect(() => {
         legacyJobRef.current = legacyJob;
     }, [legacyJob]);
+
+    useEffect(() => {
+        const streamer = metadata?.streamer?.trim().toLowerCase();
+        if (!streamer) {
+            setTtsDatasets([]);
+            setTtsTargetDatasetPath('');
+            return;
+        }
+
+        let cancelled = false;
+        const loadDatasets = async () => {
+            setTtsDatasetsLoading(true);
+            try {
+                const payload = await legacyGet<{ items: DatasetRecord[] }>(`/datasets?streamer=${encodeURIComponent(streamer)}`);
+                if (cancelled) return;
+                const items = (payload.items || []).filter((item) => item.datasetPath);
+                setTtsDatasets(items);
+                if (!ttsTargetDatasetPath && items.length > 0) {
+                    const preferred = items.find((item) => item.hasTrainArtifacts) ?? items[0];
+                    setTtsTargetDatasetPath(preferred.datasetPath || '');
+                }
+            } catch {
+                if (!cancelled) {
+                    setTtsDatasets([]);
+                }
+            } finally {
+                if (!cancelled) {
+                    setTtsDatasetsLoading(false);
+                }
+            }
+        };
+
+        void loadDatasets();
+        return () => {
+            cancelled = true;
+        };
+    }, [metadata?.streamer, legacyGet, ttsTargetDatasetPath]);
+
+    useEffect(() => {
+        const resumeJobId = searchParams.get('jobId')?.trim();
+        if (!resumeJobId) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const loadJobById = async () => {
+            try {
+                const job = await legacyGet<LegacyJob>(`/jobs/${encodeURIComponent(resumeJobId)}`);
+                if (cancelled) return;
+
+                setVodInput(job.vodUrl);
+                setVodUrl(job.vodUrl);
+                applyLegacyJob(job);
+
+                const parsed = parseVodUrl(job.vodUrl);
+                if (parsed) {
+                    await fetchMetadata(parsed.vodId, parsed.platform);
+                }
+            } catch (error) {
+                if (cancelled) return;
+                setLegacyJobError((error as Error).message);
+            }
+        };
+
+        void loadJobById();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [searchParams, legacyGet, applyLegacyJob, fetchMetadata]);
 
     const handleCreateJob = async (): Promise<void> => {
         if (!vodUrl.trim() || !metadata) return;
@@ -855,46 +995,209 @@ export const WizardPage: React.FC = () => {
     const runSrt = async (): Promise<void> => {
         if (!vodUrl.trim()) return;
         await ensureLegacyJob();
-        setSrtState({ status: 'running', message: 'Transcribing...' });
+        setSrtState({ status: 'running', message: 'Transcribing...', log: [] });
+        setSrtProgress(5);
         try {
-            const result = await legacyPost<{ path: string; log: string[] }>(
-                '/srt/run',
-                { vodUrl }
-            );
-            setSrtPath(result.path);
-            setSrtState({
-                status: 'done',
-                message: 'SRT generated',
-                log: result.log.slice(-MAX_LOG_LINES),
-                outputPath: result.path,
+            const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
+            const response = await fetch(`${baseUrl}/legacy/srt/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vodUrl,
+                    stream: true,
+                    speed: srtSpeed,
+                    acceptedOnly: srtAcceptedOnly,
+                }),
             });
-            setTrainState({ status: 'ready' });
-            await updateLegacyJob({ srt: true }, { srtPath: result.path });
+
+            if (!response.ok || !response.body) {
+                const payload = await response.json().catch(() => ({}));
+                const detail = (payload as { detail?: string }).detail || response.statusText;
+                throw new Error(detail);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let doneReceived = false;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+
+                    const evt = JSON.parse(trimmed) as {
+                        type: 'log' | 'done' | 'error';
+                        line?: string;
+                        error?: string;
+                        result?: {
+                            path: string;
+                            lines: number;
+                            excerpt: string;
+                            exitCode: number;
+                        };
+                    };
+
+                    if (evt.type === 'log' && evt.line) {
+                        const parsed = parseProgressFromLog(evt.line);
+                        setSrtProgress((prev) => {
+                            if (parsed !== null) {
+                                return Math.min(parsed, 95);
+                            }
+                            const seed = prev ?? 5;
+                            return Math.min(seed + 3, 95);
+                        });
+                        setSrtState((prev) => ({
+                            ...prev,
+                            log: appendLog(prev.log, evt.line as string),
+                        }));
+                    }
+
+                    if (evt.type === 'error') {
+                        doneReceived = true;
+                        setSrtProgress(null);
+                        setSrtState((prev) => ({
+                            status: 'error',
+                            message: evt.error || 'SRT failed',
+                            log: appendLog(prev.log, evt.error || 'SRT failed'),
+                        }));
+                    }
+
+                    if (evt.type === 'done' && evt.result) {
+                        doneReceived = true;
+                        setSrtPath(evt.result.path);
+                        setSrtProgress(100);
+                        setSrtState((prev) => ({
+                            status: 'done',
+                            message: `SRT generated (${evt.result.lines} lines)`,
+                            log: appendLog(prev.log, `[done] Subtitle lines: ${evt.result.lines}`),
+                            outputPath: evt.result.path,
+                        }));
+                        setTrainState({ status: 'ready' });
+                        await updateLegacyJob({ srt: true }, { srtPath: evt.result.path });
+                    }
+                }
+            }
+
+            if (!doneReceived) {
+                throw new Error('SRT stream ended without completion event');
+            }
         } catch (error) {
-            setSrtState({ status: 'error', message: (error as Error).message });
+            setSrtProgress(null);
+            setSrtState((prev) => ({
+                status: 'error',
+                message: (error as Error).message,
+                log: appendLog(prev.log, (error as Error).message),
+            }));
         }
     };
 
     const runTrain = async (): Promise<void> => {
         if (!vodUrl.trim()) return;
         await ensureLegacyJob();
-        setTrainState({ status: 'running', message: 'Building dataset...' });
+        setTrainState({ status: 'running', message: 'Building dataset...', log: [] });
+        setTrainProgress(5);
         try {
-            const result = await legacyPost<{ datasetPath: string; log: string[] }>(
-                '/train/run',
-                { vodUrl }
-            );
-            setDatasetPath(result.datasetPath);
-            setTrainState({
-                status: 'done',
-                message: 'Dataset ready',
-                log: result.log.slice(-MAX_LOG_LINES),
-                outputPath: result.datasetPath,
+            const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
+            const response = await fetch(`${baseUrl}/legacy/train/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vodUrl, stream: true }),
             });
-            setTtsState({ status: 'ready' });
-            await updateLegacyJob({ train: true }, { datasetPath: result.datasetPath });
+
+            if (!response.ok || !response.body) {
+                const payload = await response.json().catch(() => ({}));
+                const detail = (payload as { detail?: string }).detail || response.statusText;
+                throw new Error(detail);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let doneReceived = false;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+
+                    const evt = JSON.parse(trimmed) as {
+                        type: 'log' | 'done' | 'error';
+                        line?: string;
+                        error?: string;
+                        result?: {
+                            datasetPath: string;
+                            clipsDir: string;
+                            manifestPath: string;
+                            segmentsPath: string;
+                            exitCode: number;
+                            log: string[];
+                        };
+                    };
+
+                    if (evt.type === 'log' && evt.line) {
+                        const parsed = parseProgressFromLog(evt.line);
+                        setTrainProgress((prev) => {
+                            if (parsed !== null) return Math.min(parsed, 95);
+                            const seed = prev ?? 5;
+                            return Math.min(seed + 2, 95);
+                        });
+                        setTrainState((prev) => ({
+                            ...prev,
+                            log: appendLog(prev.log, evt.line as string),
+                        }));
+                    }
+
+                    if (evt.type === 'error') {
+                        doneReceived = true;
+                        setTrainProgress(null);
+                        setTrainState((prev) => ({
+                            status: 'error',
+                            message: evt.error || 'Train failed',
+                            log: appendLog(prev.log, evt.error || 'Train failed'),
+                        }));
+                    }
+
+                    if (evt.type === 'done' && evt.result) {
+                        doneReceived = true;
+                        setDatasetPath(evt.result.datasetPath);
+                        setTrainProgress(100);
+                        setTrainState((prev) => ({
+                            status: 'done',
+                            message: 'Dataset ready',
+                            log: (evt.result?.log ?? prev.log ?? []).slice(-MAX_LOG_LINES),
+                            outputPath: evt.result.datasetPath,
+                        }));
+                        setTtsState({ status: 'ready' });
+                        await updateLegacyJob({ train: true }, { datasetPath: evt.result.datasetPath });
+                    }
+                }
+            }
+
+            if (!doneReceived) {
+                throw new Error('Train stream ended without completion event');
+            }
         } catch (error) {
-            setTrainState({ status: 'error', message: (error as Error).message });
+            setTrainProgress(null);
+            setTrainState((prev) => ({
+                status: 'error',
+                message: (error as Error).message,
+                log: appendLog(prev.log, (error as Error).message),
+            }));
         }
     };
 
@@ -909,6 +1212,10 @@ export const WizardPage: React.FC = () => {
                     vodUrl,
                     streamer: metadata.streamer,
                     text: ttsText,
+                    sourceMode: ttsSourceMode,
+                    targetDatasetPath: ttsSourceMode === 'target_dataset' ? ttsTargetDatasetPath || undefined : undefined,
+                    qualityPreset: ttsQualityPreset,
+                    acceptedOnly: ttsAcceptedOnly,
                 }
             );
             setTtsPath(result.outputPath);
@@ -920,7 +1227,15 @@ export const WizardPage: React.FC = () => {
             });
             await updateLegacyJob({ tts: true }, { ttsPath: result.outputPath });
         } catch (error) {
-            setTtsState({ status: 'error', message: (error as Error).message });
+            const errorMessage = (error as Error).message;
+            setTtsState({
+                status: 'error',
+                message: errorMessage,
+                log: [
+                    `[${new Date().toLocaleTimeString()}] TTS failed`,
+                    `[${new Date().toLocaleTimeString()}] ${errorMessage}`,
+                ],
+            });
         }
     };
 
@@ -966,11 +1281,11 @@ export const WizardPage: React.FC = () => {
         () => overallProgressForSteps([
             { status: extractState.status },
             { status: sanitizeState.status, progress: sanitizeProgress },
-            { status: srtState.status },
-            { status: trainState.status },
+            { status: srtState.status, progress: srtProgress },
+            { status: trainState.status, progress: trainProgress },
             { status: ttsState.status },
         ]),
-        [extractState.status, sanitizeState.status, srtState.status, trainState.status, ttsState.status, sanitizeProgress]
+        [extractState.status, sanitizeState.status, srtState.status, trainState.status, ttsState.status, sanitizeProgress, srtProgress, trainProgress]
     );
 
     const sanitizeProgressValue = useMemo(
@@ -981,6 +1296,16 @@ export const WizardPage: React.FC = () => {
     const extractProgressValue = useMemo(
         () => progressValueForStep(extractState.status, extractProgress),
         [extractState.status, extractProgress]
+    );
+
+    const srtProgressValue = useMemo(
+        () => progressValueForStep(srtState.status, srtProgress),
+        [srtState.status, srtProgress]
+    );
+
+    const trainProgressValue = useMemo(
+        () => progressValueForStep(trainState.status, trainProgress),
+        [trainState.status, trainProgress]
     );
 
     const sanitizeSuggestion = useMemo(() => {
@@ -1006,29 +1331,60 @@ export const WizardPage: React.FC = () => {
         };
     }, [sanitizeState.status, sanitizeState.message, sanitizeExtractVocals]);
 
-    const activeRun = useMemo(() => {
-        if (extractState.status === 'running') return { key: 'extract' as RunKey, label: 'Extract audio' };
-        if (sanitizeState.status === 'running') return { key: 'sanitize' as RunKey, label: 'Sanitize audio' };
-        if (srtState.status === 'running') return { key: 'srt' as RunKey, label: 'Transcribe (SRT)' };
-        if (trainState.status === 'running') return { key: 'train' as RunKey, label: 'Train dataset' };
-        if (ttsState.status === 'running') return { key: 'tts' as RunKey, label: 'Generate TTS' };
-        return null;
+    const scrollToStep = useCallback((key: RunKey) => {
+        const refMap: Record<RunKey, React.RefObject<HTMLDivElement | null>> = {
+            extract: extractRef,
+            sanitize: sanitizeRef,
+            srt: srtRef,
+            train: trainRef,
+            tts: ttsRef,
+        };
+        refMap[key].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, []);
+
+    const runningJobs = useMemo(() => {
+        const jobs: Array<{ key: RunKey; label: string; running: boolean }> = [
+            { key: 'extract', label: 'Extract audio', running: extractState.status === 'running' },
+            { key: 'sanitize', label: 'Sanitize audio', running: sanitizeState.status === 'running' },
+            { key: 'srt', label: 'Transcribe (SRT)', running: srtState.status === 'running' },
+            { key: 'train', label: 'Train dataset', running: trainState.status === 'running' },
+            { key: 'tts', label: 'Generate TTS', running: ttsState.status === 'running' },
+        ];
+        return jobs;
     }, [extractState.status, sanitizeState.status, srtState.status, trainState.status, ttsState.status]);
 
-    const canStopActive = activeRun?.key === 'sanitize';
+    useEffect(() => {
+        const visibleRunningToastIds = new Set<string>();
 
-    const handleStopActiveRun = async (): Promise<void> => {
-        if (!activeRun) return;
-        if (activeRun.key !== 'sanitize') return;
-        sanitizeAbortRef.current?.abort();
-        if (legacyJob?.id) {
-            try {
-                await legacyPostNoBody(`/jobs/${legacyJob.id}/cancel`);
-            } catch (error) {
-                setLegacyJobError((error as Error).message);
+        runningJobs.forEach((job) => {
+            const toastId = `wizard-running-${job.key}`;
+            if (job.running) {
+                visibleRunningToastIds.add(toastId);
+                showToast('info', `Running: ${job.label}`, 0, {
+                    id: toastId,
+                    busy: true,
+                    onClick: () => scrollToStep(job.key),
+                });
+            } else {
+                removeToast(toastId);
             }
-        }
-    };
+        });
+
+        runningToastIdsRef.current.forEach((toastId) => {
+            if (!visibleRunningToastIds.has(toastId)) {
+                removeToast(toastId);
+            }
+        });
+
+        runningToastIdsRef.current = visibleRunningToastIds;
+    }, [runningJobs, showToast, removeToast, scrollToStep]);
+
+    useEffect(() => {
+        return () => {
+            runningToastIdsRef.current.forEach((toastId) => removeToast(toastId));
+            runningToastIdsRef.current.clear();
+        };
+    }, [removeToast]);
 
     const showExtract = Boolean(legacyJob);
     const showSanitize = extractState.status === 'done';
@@ -1076,9 +1432,9 @@ export const WizardPage: React.FC = () => {
                             <button className="primary-btn px-5 py-3 rounded-xl text-sm font-semibold transition-all">
                                 Start new run
                             </button>
-                            <button className="secondary-btn px-5 py-3 rounded-xl text-sm font-semibold transition-all">
+                            <Link to="/jobs" className="secondary-btn px-5 py-3 rounded-xl text-sm font-semibold transition-all inline-flex items-center">
                                 See recent jobs
-                            </button>
+                            </Link>
                         </div>
                     </div>
                 </div>
@@ -1333,14 +1689,14 @@ export const WizardPage: React.FC = () => {
                                 <div
                                     className="audio-waveform"
                                     ref={waveformShellRef}
-                                    onClick={(event) => handleWaveformSeek(event, audioRef.current, waveformShellRef.current)}
+                                    onClick={(event) => handleWaveformSeek(event, extractedPreviewSrc, waveformShellRef.current)}
                                     role="button"
                                     tabIndex={0}
                                     onKeyDown={(event) => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                             handleWaveformSeek(
                                                 event as unknown as React.MouseEvent<HTMLDivElement>,
-                                                audioRef.current,
+                                                extractedPreviewSrc,
                                                 waveformShellRef.current
                                             );
                                         }
@@ -1365,9 +1721,35 @@ export const WizardPage: React.FC = () => {
                                         </div>
                                     )}
                                 </div>
-                                <audio ref={audioRef} className="audio-player" controls preload="metadata">
+                                <div className="inline-global-player-controls">
+                                    <button
+                                        type="button"
+                                        className="secondary-btn px-3 py-2 rounded-lg text-xs font-semibold"
+                                        onClick={() => handlePreviewToggle(extractedPreviewSrc)}
+                                    >
+                                        {globalAudioSrc === extractedPreviewSrc && globalAudioPlaying ? 'Pause' : 'Play'}
+                                    </button>
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={Math.max(globalAudioSrc === extractedPreviewSrc ? globalAudioDuration : 0, 1)}
+                                        step={0.1}
+                                        value={globalAudioSrc === extractedPreviewSrc ? globalAudioTime : 0}
+                                        onChange={(event) => {
+                                            const value = Number(event.target.value);
+                                            if (globalAudioSrc !== extractedPreviewSrc) {
+                                                void ensureGlobalPreviewSource(extractedPreviewSrc, value, false);
+                                                return;
+                                            }
+                                            seek(value);
+                                        }}
+                                    />
+                                    <span className="inline-global-time">
+                                        {formatAudioTime(globalAudioSrc === extractedPreviewSrc ? globalAudioTime : 0)} / {formatAudioTime(globalAudioSrc === extractedPreviewSrc ? globalAudioDuration : 0)}
+                                    </span>
+                                </div>
+                                <audio ref={audioRef} preload="metadata" style={{ display: 'none' }}>
                                     <source src={getArtifactUrl(audioPath)} type="audio/wav" />
-                                    Your browser does not support the audio element.
                                 </audio>
                             </div>
                         )}
@@ -1552,7 +1934,7 @@ export const WizardPage: React.FC = () => {
                                     onClick={(event) =>
                                         handleWaveformSeek(
                                             event,
-                                            cleanAudioRef.current,
+                                            sanitizedPreviewSrc,
                                             compareEnabled ? compareShellRef.current : cleanWaveformShellRef.current
                                         )
                                     }
@@ -1562,7 +1944,7 @@ export const WizardPage: React.FC = () => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                             handleWaveformSeek(
                                                 event as unknown as React.MouseEvent<HTMLDivElement>,
-                                                cleanAudioRef.current,
+                                                sanitizedPreviewSrc,
                                                 compareEnabled ? compareShellRef.current : cleanWaveformShellRef.current
                                             );
                                         }
@@ -1615,19 +1997,43 @@ export const WizardPage: React.FC = () => {
                                     </div>
                                 )}
 
+                                <div className="inline-global-player-controls">
+                                    <button
+                                        type="button"
+                                        className="secondary-btn px-3 py-2 rounded-lg text-xs font-semibold"
+                                        onClick={() => handlePreviewToggle(sanitizedPreviewSrc)}
+                                    >
+                                        {globalAudioSrc === sanitizedPreviewSrc && globalAudioPlaying ? 'Pause' : 'Play'}
+                                    </button>
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={Math.max(globalAudioSrc === sanitizedPreviewSrc ? globalAudioDuration : 0, 1)}
+                                        step={0.1}
+                                        value={globalAudioSrc === sanitizedPreviewSrc ? globalAudioTime : 0}
+                                        onChange={(event) => {
+                                            const value = Number(event.target.value);
+                                            if (globalAudioSrc !== sanitizedPreviewSrc) {
+                                                void ensureGlobalPreviewSource(sanitizedPreviewSrc, value, false);
+                                                return;
+                                            }
+                                            seek(value);
+                                        }}
+                                    />
+                                    <span className="inline-global-time">
+                                        {formatAudioTime(globalAudioSrc === sanitizedPreviewSrc ? globalAudioTime : 0)} / {formatAudioTime(globalAudioSrc === sanitizedPreviewSrc ? globalAudioDuration : 0)}
+                                    </span>
+                                </div>
                                 <audio
                                     ref={cleanAudioRef}
-                                    className="audio-player"
-                                    controls
                                     preload="metadata"
-                                    onPlay={handleSanitizedPlay}
+                                    style={{ display: 'none' }}
                                 >
                                     <source src={getArtifactUrl(cleanPath)} type="audio/wav" />
-                                    Your browser does not support the audio element.
                                 </audio>
                                 {compareEnabled && (
                                     <div className="text-xs text-slate-500 mt-2">
-                                        A/B preview: playing starts with 2s of original, then sanitized.
+                                        Compare mode overlays waveforms; playback uses global player to avoid parallel audio.
                                     </div>
                                 )}
                             </div>
@@ -1743,6 +2149,35 @@ export const WizardPage: React.FC = () => {
                             </p>
                         </div>
 
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div>
+                                <label className="text-sm text-slate-400">
+                                    Speed
+                                    <span className="help-tip" data-tip="Fast = quickest, Accurate = best quality, Balanced = default.">?</span>
+                                </label>
+                                <select
+                                    value={srtSpeed}
+                                    onChange={(event) => setSrtSpeed(event.target.value as 'accurate' | 'balanced' | 'fast')}
+                                    disabled={srtState.status === 'running'}
+                                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-white disabled:opacity-60"
+                                >
+                                    <option value="fast">Fast</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="accurate">Accurate</option>
+                                </select>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-slate-300 md:pt-7">
+                                <input
+                                    type="checkbox"
+                                    checked={srtAcceptedOnly}
+                                    onChange={(event) => setSrtAcceptedOnly(event.target.checked)}
+                                    disabled={srtState.status === 'running'}
+                                />
+                                Use accepted regions only
+                                <span className="help-tip" data-tip="Transcribe only kept/review-accepted sanitize regions.">?</span>
+                            </label>
+                        </div>
+
                         <div className="flex items-center gap-3">
                             <button
                                 type="button"
@@ -1764,12 +2199,12 @@ export const WizardPage: React.FC = () => {
                                     Progress
                                     <span className="help-tip" data-tip="Step progress based on current run state.">?</span>
                                 </span>
-                                <span>{progressForStatus(srtState.status)}%</span>
+                                <span>{srtProgressValue}%</span>
                             </div>
                             <div className="progress-track">
                                 <div
                                     className={progressClass(srtState.status)}
-                                    style={{ width: `${progressForStatus(srtState.status)}%` }}
+                                    style={{ width: `${srtProgressValue}%` }}
                                 ></div>
                             </div>
                         </div>
@@ -1821,12 +2256,12 @@ export const WizardPage: React.FC = () => {
                                     Progress
                                     <span className="help-tip" data-tip="Step progress based on current run state.">?</span>
                                 </span>
-                                <span>{progressForStatus(trainState.status)}%</span>
+                                <span>{trainProgressValue}%</span>
                             </div>
                             <div className="progress-track">
                                 <div
                                     className={progressClass(trainState.status)}
-                                    style={{ width: `${progressForStatus(trainState.status)}%` }}
+                                    style={{ width: `${trainProgressValue}%` }}
                                 ></div>
                             </div>
                         </div>
@@ -1853,8 +2288,69 @@ export const WizardPage: React.FC = () => {
                                 <span className="help-tip" data-tip="Generates a voice sample from your trained dataset.">?</span>
                             </h2>
                             <p className="text-sm text-slate-400">
-                                Generate a test voice sample from the dataset.
+                                Generate a test voice sample from prepared dataset clips (XTTS speaker conditioning).
                             </p>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div>
+                                <label className="text-sm text-slate-400">
+                                    Quality Preset
+                                    <span className="help-tip" data-tip="Fast uses fewer clips, Best uses the largest clip pool for highest quality.">?</span>
+                                </label>
+                                <select
+                                    value={ttsQualityPreset}
+                                    onChange={(event) => setTtsQualityPreset(event.target.value as 'fast' | 'balanced' | 'best')}
+                                    className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-white"
+                                >
+                                    <option value="fast">Fast</option>
+                                    <option value="balanced">Balanced</option>
+                                    <option value="best">Best</option>
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-2 pt-6 text-sm text-slate-300">
+                                <input
+                                    type="checkbox"
+                                    checked={ttsAcceptedOnly}
+                                    onChange={(event) => setTtsAcceptedOnly(event.target.checked)}
+                                />
+                                Use accepted-only clips when available
+                            </div>
+                        </div>
+
+                        <div className="space-y-2 rounded-lg border border-white/10 p-3">
+                            <label className="flex items-center gap-2 text-sm text-slate-300">
+                                <input
+                                    type="checkbox"
+                                    checked={ttsSourceMode === 'target_dataset'}
+                                    onChange={(event) => setTtsSourceMode(event.target.checked ? 'target_dataset' : 'all_streamer')}
+                                />
+                                Use target dataset
+                            </label>
+                            {ttsSourceMode === 'target_dataset' ? (
+                                <div>
+                                    <label className="text-xs text-slate-400">Target dataset</label>
+                                    <select
+                                        value={ttsTargetDatasetPath}
+                                        onChange={(event) => setTtsTargetDatasetPath(event.target.value)}
+                                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-white"
+                                    >
+                                        {ttsDatasets.length === 0 ? (
+                                            <option value="">{ttsDatasetsLoading ? 'Loading datasets...' : 'No datasets found'}</option>
+                                        ) : (
+                                            ttsDatasets.map((item) => (
+                                                <option key={item.datasetId} value={item.datasetPath || ''}>
+                                                    {(item.runId ? `Run ${item.runId}` : 'Legacy dataset')} • {item.clipsCount ?? 0} clips
+                                                </option>
+                                            ))
+                                        )}
+                                    </select>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-400">
+                                    Using all available streamer datasets (all VOD runs).
+                                </p>
+                            )}
                         </div>
 
                         <div>
@@ -1908,6 +2404,8 @@ export const WizardPage: React.FC = () => {
                                         {line}
                                     </div>
                                 ))
+                            ) : ttsState.status === 'error' ? (
+                                <div className="log-line text-red-400">{ttsState.message || 'TTS failed.'}</div>
                             ) : (
                                 <div className="log-line text-slate-500">Waiting for TTS logs...</div>
                             )}
@@ -1929,25 +2427,6 @@ export const WizardPage: React.FC = () => {
                     </div>
                 </div>
             </div>
-            {activeRun && (
-                <div className="run-window" role="status" aria-live="polite">
-                    <div className="run-window-title">Running job</div>
-                    <div className="run-window-step">{activeRun.label}</div>
-                    <div className="run-window-actions">
-                        <button
-                            type="button"
-                            onClick={handleStopActiveRun}
-                            disabled={!canStopActive}
-                            className="secondary-btn px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
-                        >
-                            Stop
-                        </button>
-                        {!canStopActive && (
-                            <span className="run-window-hint">Stop not available for this step yet.</span>
-                        )}
-                    </div>
-                </div>
-            )}
             {reviewOpen && (
                 <div className="review-modal-overlay" role="dialog" aria-modal="true">
                     <div className="review-modal glass">

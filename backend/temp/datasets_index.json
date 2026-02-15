@@ -1,0 +1,103 @@
+[
+  {
+    "datasetId": "juggernautjason:20260214_212514",
+    "streamer": "juggernautjason",
+    "runId": "20260214_212514",
+    "status": "completed",
+    "createdAt": "2026-02-14T21:43:38.728880",
+    "vodUrl": "https://www.twitch.tv/videos/2696771766",
+    "vodId": "2696771766",
+    "datasetPath": "backend/dataset/juggernautjason/runs/20260214_212514",
+    "clipsPath": null,
+    "clipsCount": 0,
+    "manifestPath": null,
+    "segmentsPath": "backend/dataset/juggernautjason/runs/20260214_212514/2696771766_segments.json",
+    "latestTtsPath": "backend/out/juggernautjason/tts/tts_juggernautjason_20260215_020609.wav",
+    "hasTrainArtifacts": false,
+    "hasTtsArtifacts": true,
+    "params": {
+      "mode": "voice",
+      "preset": "strict",
+      "strictness": 0.7,
+      "extract_vocals": true,
+      "preserve_pauses": true,
+      "reduce_sfx": true,
+      "target_lufs": -18.0,
+      "true_peak_limit_db": -1.0,
+      "fade_ms": 12,
+      "voice_sample_count": 5,
+      "voice_sample_min_duration": 2.0,
+      "voice_sample_max_duration": 6.0,
+      "voice_sample_min_rms_db": -35.0
+    },
+    "stats": {
+      "total_segments": 1490,
+      "kept_segments": 1104,
+      "total_duration": 8004.959999999995,
+      "clean_duration": 6953.479999999997,
+      "rejection_reasons": {
+        "low_quality": 386
+      }
+    }
+  },
+  {
+    "datasetId": "juggernautjason:20260214_195748",
+    "streamer": "juggernautjason",
+    "runId": "20260214_195748",
+    "status": "completed",
+    "createdAt": "2026-02-14T19:59:15.441463",
+    "vodUrl": "https://www.twitch.tv/videos/2453173157",
+    "vodId": "2453173157",
+    "datasetPath": "backend/dataset/juggernautjason/runs/20260214_195748",
+    "clipsPath": null,
+    "clipsCount": 0,
+    "manifestPath": null,
+    "segmentsPath": "backend/dataset/juggernautjason/runs/20260214_195748/2453173157_segments.json",
+    "latestTtsPath": "backend/out/juggernautjason/tts/tts_juggernautjason_20260215_020609.wav",
+    "hasTrainArtifacts": false,
+    "hasTtsArtifacts": true,
+    "params": {
+      "mode": "voice",
+      "preset": "strict",
+      "strictness": 0.7,
+      "extract_vocals": true,
+      "preserve_pauses": true,
+      "reduce_sfx": true,
+      "target_lufs": -18.0,
+      "true_peak_limit_db": -1.0,
+      "fade_ms": 12,
+      "voice_sample_count": 5,
+      "voice_sample_min_duration": 2.0,
+      "voice_sample_max_duration": 6.0,
+      "voice_sample_min_rms_db": -35.0
+    },
+    "stats": {
+      "total_segments": 139,
+      "kept_segments": 97,
+      "total_duration": 626.7599999999999,
+      "clean_duration": 513.7999999999997,
+      "rejection_reasons": {
+        "low_quality": 42
+      }
+    }
+  },
+  {
+    "datasetId": "juggernautjason:legacy",
+    "streamer": "juggernautjason",
+    "runId": null,
+    "status": "legacy",
+    "createdAt": null,
+    "vodUrl": null,
+    "vodId": null,
+    "datasetPath": "backend/dataset/juggernautjason",
+    "clipsPath": "backend/dataset/juggernautjason/clips",
+    "clipsCount": 6546,
+    "manifestPath": "backend/dataset/juggernautjason/manifest.csv",
+    "segmentsPath": null,
+    "latestTtsPath": "backend/out/juggernautjason/tts/tts_juggernautjason_20260215_020609.wav",
+    "hasTrainArtifacts": true,
+    "hasTtsArtifacts": true,
+    "params": {},
+    "stats": {}
+  }
+]

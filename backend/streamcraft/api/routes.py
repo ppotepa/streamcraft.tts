@@ -1,6 +1,7 @@
 """API routes for the wizard."""
 
 import datetime
+import asyncio
 import json
 import os
 import shutil
@@ -40,8 +41,13 @@ from streamcraft.models.api import (
     UpdateJobRequest,
     TranscribeSegmentRequest,
     TranscribeSegmentWord,
+    DatasetListResponse,
+    DatasetRecordResponse,
+    StreamerDatasetSummaryListResponse,
+    StreamerDatasetSummaryResponse,
 )
 from streamcraft.settings import get_settings
+from streamcraft.jobs.datasets_index import get_datasets_index, refresh_datasets_index, summarize_streamers
 
 router = APIRouter()
 WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
@@ -442,7 +448,20 @@ def _segment_review_path(vod_url: str, out_root: Path, dataset_root: Path) -> Pa
 
     _, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
     vod_slug = vod_dir.name
-    return dataset_dir / f"{vod_slug}_segment_review.json"
+    
+    # Try flat structure first (legacy)
+    review_path = dataset_dir / f"{vod_slug}_segment_review.json"
+    if not review_path.exists():
+        # Fall back to latest run in versioned structure
+        runs_dir = dataset_dir / "runs"
+        if runs_dir.exists():
+            run_dirs = sorted([d for d in runs_dir.iterdir() if d.is_dir()], reverse=True)
+            for run_dir in run_dirs:
+                candidate = run_dir / f"{vod_slug}_segment_review.json"
+                if candidate.exists():
+                    return candidate
+    
+    return review_path
 
 
 def _load_review_payload(review_path: Path) -> dict:
@@ -452,6 +471,30 @@ def _load_review_payload(review_path: Path) -> dict:
         return json.loads(review_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Corrupted review file: {exc}")
+
+
+def _find_latest_run_manifest(dataset_dir: Path, vod_slug: str) -> Path | None:
+    """Find the most recent manifest in runs/ directory structure."""
+    runs_dir = dataset_dir / "runs"
+    if not runs_dir.exists():
+        return None
+    
+    # Find all run directories
+    run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+    if not run_dirs:
+        return None
+    
+    # Sort by name (which are timestamps like 20260213_011641)
+    run_dirs.sort(reverse=True)
+    
+    # Look for manifest in each run, newest first
+    manifest_name = f"{vod_slug}_segments.json"
+    for run_dir in run_dirs:
+        manifest_path = run_dir / manifest_name
+        if manifest_path.exists():
+            return manifest_path
+    
+    return None
 
 
 def _load_manifest(manifest_path: Path) -> dict:
@@ -472,12 +515,30 @@ async def get_sanitize_segments(
     limit: int = Query(200, ge=1, le=1000),
 ) -> SegmentManifestResponse:
     from streamcraft.core.pipeline import resolve_output_dirs
+    from streamcraft.core.dataset import parse_srt
 
     out_root = Path(outdir or "out")
     dataset_root = Path(datasetOut or "dataset")
     _, vod_dir, dataset_dir = resolve_output_dirs(vodUrl, out_root, dataset_root)
+    
+    # Try flat structure first (legacy)
     manifest_path = dataset_dir / f"{vod_dir.name}_segments.json"
+    if not manifest_path.exists():
+        # Fall back to latest run in versioned structure
+        latest_manifest = _find_latest_run_manifest(dataset_dir, vod_dir.name)
+        if latest_manifest:
+            manifest_path = latest_manifest
+    
     payload = _load_manifest(manifest_path)
+    
+    # Load SRT for transcription text
+    srt_path = vod_dir / f"{vod_dir.name}.srt"
+    srt_cues = []
+    if srt_path.exists():
+        try:
+            srt_cues = parse_srt(srt_path)
+        except Exception:
+            pass  # SRT not available, segments will have no text
 
     clean_path = vod_dir / f"{vod_dir.name}_clean.wav"
     clean_path_rel = to_workspace_relative(clean_path) if clean_path.exists() else None
@@ -504,15 +565,30 @@ async def get_sanitize_segments(
     for idx in range(slice_start, slice_end):
         seg = segments[idx]
         clean_start, clean_end = clean_offsets.get(idx, (None, None))
+        
+        # Match segment with SRT cues by time overlap
+        seg_start = float(seg.get("start", 0.0))
+        seg_end = float(seg.get("end", 0.0))
+        text = None
+        if srt_cues:
+            # Find all cues that overlap with this segment
+            overlapping = [
+                cue for cue in srt_cues
+                if not (cue.end <= seg_start or cue.start >= seg_end)
+            ]
+            if overlapping:
+                text = " ".join(cue.text for cue in overlapping).strip()
+        
         items.append(
             SegmentManifestItem(
                 index=idx,
-                start=float(seg.get("start", 0.0)),
-                end=float(seg.get("end", 0.0)),
+                start=seg_start,
+                end=seg_end,
                 duration=float(seg.get("dur", 0.0)),
                 cleanStart=clean_start,
                 cleanEnd=clean_end,
                 kept=seg.get("kept"),
+                text=text,
                 quality=seg.get("quality"),
                 speechRatio=seg.get("speech_ratio"),
                 snrDb=seg.get("snr_db"),
@@ -542,6 +618,7 @@ async def run_train(request: RunTrainRequest) -> RunTrainResponse:
     try:
         from streamcraft.core.pipeline import resolve_output_dirs, configure_temp_dir
         from streamcraft.core.dataset import run_dataset
+        import streamcraft.core.dataset as dataset_module
         import shutil
         import subprocess
 
@@ -569,68 +646,117 @@ async def run_train(request: RunTrainRequest) -> RunTrainResponse:
             stamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
             log_buffer.append(f"[{stamp}] {msg}")
 
-        add_log(f"Streamer bucket: {streamer_slug}")
-        add_log(f"Dataset dir: {dataset_dir}")
-        add_log(f"Input audio: {clean_audio}")
-        add_log(f"SRT: {srt_path}")
+        def execute_train(log_writer) -> dict:
+            log_writer(f"Streamer bucket: {streamer_slug}")
+            log_writer(f"Dataset dir: {dataset_dir}")
+            log_writer(f"Input audio: {clean_audio}")
+            log_writer(f"SRT: {srt_path}")
+            log_writer("[progress] 10% Preparing dataset slicing")
 
-        run_dataset(
-            input_audio=clean_audio,
-            srt_path=srt_path,
-            out_dir=dataset_dir,
-            use_demucs=False,
-            min_speech_ms=request.minSpeechMs,
-            max_clip_sec=request.maxClipSec,
-            pad_ms=request.padMs,
-            merge_gap_ms=request.mergeGapMs,
-            min_rms_db=None,
-            threads=request.threads,
-            force=request.force,
-            clip_aac=request.clipAac,
-            clip_aac_bitrate=request.clipAacBitrate,
-        )
+            original_log = dataset_module.log
+            original_log_ok = dataset_module.log_ok
+            original_log_warn = dataset_module.log_warn
+            dataset_module.log = log_writer
+            dataset_module.log_ok = log_writer
+            dataset_module.log_warn = log_writer
 
-        add_log("Clips sliced from clean audio")
-
-        # Copy the clean WAV into the dataset folder for reference
-        copied_clean = dataset_dir / f"{vod_slug}_clean.wav"
-        try:
-            shutil.copyfile(clean_audio, copied_clean)
-            add_log(f"Copied clean WAV -> {copied_clean}")
-        except Exception as exc:
-            add_log(f"WARN: could not copy clean WAV: {exc}")
-
-        if request.clipAac:
-            aac_path = dataset_dir / f"{vod_slug}_clean.m4a"
             try:
-                cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(clean_audio),
-                    "-vn",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    f"{request.clipAacBitrate}k",
-                    str(aac_path),
-                ]
-                subprocess.run(cmd, check=True, capture_output=True)
-                add_log(f"Exported AAC reference -> {aac_path}")
+                run_dataset(
+                    input_audio=clean_audio,
+                    srt_path=srt_path,
+                    out_dir=dataset_dir,
+                    use_demucs=False,
+                    min_speech_ms=request.minSpeechMs,
+                    max_clip_sec=request.maxClipSec,
+                    pad_ms=request.padMs,
+                    merge_gap_ms=request.mergeGapMs,
+                    min_rms_db=None,
+                    threads=request.threads,
+                    force=request.force,
+                    clip_aac=request.clipAac,
+                    clip_aac_bitrate=request.clipAacBitrate,
+                )
+            finally:
+                dataset_module.log = original_log
+                dataset_module.log_ok = original_log_ok
+                dataset_module.log_warn = original_log_warn
+
+            log_writer("[progress] 70% Slicing complete, copying artifacts")
+
+            copied_clean = dataset_dir / f"{vod_slug}_clean.wav"
+            try:
+                shutil.copyfile(clean_audio, copied_clean)
+                log_writer(f"Copied clean WAV -> {copied_clean}")
             except Exception as exc:
-                add_log(f"WARN: AAC export failed: {exc}")
+                log_writer(f"WARN: could not copy clean WAV: {exc}")
 
-        clip_count = len(list(clips_dir.glob("*.wav"))) + len(list(clips_dir.glob("*.m4a")))
-        add_log(f"Clip count: {clip_count}")
+            if request.clipAac:
+                aac_path = dataset_dir / f"{vod_slug}_clean.m4a"
+                try:
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(clean_audio),
+                        "-vn",
+                        "-c:a",
+                        "aac",
+                        "-b:a",
+                        f"{request.clipAacBitrate}k",
+                        str(aac_path),
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    log_writer(f"Exported AAC reference -> {aac_path}")
+                except Exception as exc:
+                    log_writer(f"WARN: AAC export failed: {exc}")
 
-        return RunTrainResponse(
-            datasetPath=to_workspace_relative(dataset_dir),
-            clipsDir=to_workspace_relative(clips_dir),
-            manifestPath=to_workspace_relative(manifest_csv),
-            segmentsPath=to_workspace_relative(segments_json),
-            exitCode=0,
-            log=log_buffer,
-        )
+            clip_count = len(list(clips_dir.glob("*.wav"))) + len(list(clips_dir.glob("*.m4a")))
+            log_writer(f"Clip count: {clip_count}")
+            log_writer("[progress] 90% Refreshing datasets index")
+
+            refresh_datasets_index(dataset_root, out_root, WORKSPACE_ROOT)
+            log_writer("[progress] 100% Training complete")
+
+            return {
+                "datasetPath": to_workspace_relative(dataset_dir),
+                "clipsDir": to_workspace_relative(clips_dir),
+                "manifestPath": to_workspace_relative(manifest_csv),
+                "segmentsPath": to_workspace_relative(segments_json),
+                "exitCode": 0,
+                "log": log_buffer,
+            }
+
+        if not request.stream:
+            payload = execute_train(add_log)
+            return RunTrainResponse(**payload)
+
+        events: queue.Queue[object] = queue.Queue()
+        sentinel = object()
+
+        def stream_log(msg: str) -> None:
+            add_log(msg)
+            events.put(json.dumps({"type": "log", "line": log_buffer[-1]}))
+
+        def worker() -> None:
+            try:
+                payload = execute_train(stream_log)
+                events.put(json.dumps({"type": "done", "result": payload}))
+            except Exception as exc:
+                events.put(json.dumps({"type": "error", "error": f"Training failed: {exc}"}))
+            finally:
+                events.put(sentinel)
+
+        async def iterator():
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+
+            while True:
+                item = await asyncio.to_thread(events.get)
+                if item is sentinel:
+                    break
+                yield f"{item}\n"
+
+        return StreamingResponse(iterator(), media_type="application/x-ndjson")
 
     except HTTPException:
         raise
@@ -798,64 +924,220 @@ async def run_srt(request: RunSrtRequest) -> RunSrtResponse:
         out_root = Path("out")
         dataset_root = Path("dataset")
 
-        _, vod_dir, _ = resolve_output_dirs(vod_url, out_root, dataset_root)
+        _, vod_dir, dataset_dir = resolve_output_dirs(vod_url, out_root, dataset_root)
         vod_dir.mkdir(parents=True, exist_ok=True)
 
-        log_buffer = []
+        log_buffer: list[str] = []
 
         def capture_log(msg: str):
             timestamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
             entry = f"[{timestamp}] {msg}"
             log_buffer.append(entry)
-            print(entry)
+            try:
+                print(entry)
+            except UnicodeEncodeError:
+                stdout = getattr(sys, "stdout", None)
+                if stdout is not None:
+                    safe = entry.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+                    stdout.buffer.write((safe + "\n").encode("utf-8", errors="replace"))
+                    stdout.flush()
 
-        capture_log(f"SRT start vod={vod_url} out_dir={vod_dir}")
+        def _prepare_accepted_only_audio(log_writer) -> Path:
+            vod_slug = vod_dir.name
+            clean_path = vod_dir / f"{vod_slug}_clean.wav"
+            if not clean_path.exists() or clean_path.stat().st_size == 0:
+                raise RuntimeError("Accepted-only SRT requires clean audio; run sanitize first")
 
-        # Mock the log functions to capture output
-        import streamcraft.core.transcribe as transcribe_module
-        original_log = transcribe_module.log
-        original_log_ok = transcribe_module.log_ok
-        transcribe_module.log = capture_log
-        transcribe_module.log_ok = capture_log
+            manifest_path = dataset_dir / f"{vod_slug}_segments.json"
+            if not manifest_path.exists():
+                latest_manifest = _find_latest_run_manifest(dataset_dir, vod_slug)
+                if latest_manifest:
+                    manifest_path = latest_manifest
 
-        try:
-            result = run_transcription(
-                vod=vod_url,
-                out_dir=vod_dir,
-                model="large-v3",
-                language="auto",
-                threads=8,
-                device="cuda",
-                compute_type="float16",
-                progress_interval=10.0,
-                vod_quality="audio_only",
-                mux_subs=False,
-                also_vtt=False,
-                also_txt=True,
-                force=False,
-                max_duration=None,
+            payload = _load_manifest(manifest_path)
+            segments = payload.get("segments") or []
+            if not segments:
+                raise RuntimeError("Accepted-only SRT requires sanitize segments manifest")
+
+            kept_indices = {idx for idx, seg in enumerate(segments) if bool(seg.get("kept"))}
+            if not kept_indices:
+                raise RuntimeError("No kept segments available for accepted-only SRT")
+
+            accepted_indices = set(kept_indices)
+            review_path = _segment_review_path(vod_url, out_root, dataset_root)
+            if review_path.exists():
+                review_payload = _load_review_payload(review_path)
+                votes = review_payload.get("votes") or []
+                for vote in votes:
+                    idx = vote.get("index")
+                    decision = vote.get("decision")
+                    if not isinstance(idx, int) or idx not in kept_indices:
+                        continue
+                    if decision == "reject":
+                        accepted_indices.discard(idx)
+                    elif decision == "accept":
+                        accepted_indices.add(idx)
+                log_writer(
+                    f"[i] Review filters applied for SRT: accepted={len(accepted_indices)} kept={len(kept_indices)}"
+                )
+
+            if not accepted_indices:
+                raise RuntimeError("All kept segments were rejected; cannot run accepted-only SRT")
+
+            if len(accepted_indices) == len(kept_indices):
+                log_writer(f"[i] Accepted-only SRT uses clean audio: {clean_path}")
+                return clean_path
+
+            clean_offsets: dict[int, tuple[float, float]] = {}
+            cursor = 0.0
+            for idx, seg in enumerate(segments):
+                if idx not in kept_indices:
+                    continue
+                start = float(seg.get("start", 0.0))
+                end = float(seg.get("end", start))
+                duration = float(seg.get("dur", max(0.0, end - start)))
+                if duration <= 0:
+                    continue
+                clean_offsets[idx] = (cursor, cursor + duration)
+                cursor += duration
+
+            audio, sr = sf.read(str(clean_path), always_2d=False)
+            chunks = []
+            sorted_indices = sorted(accepted_indices)
+            for idx in sorted_indices:
+                bounds = clean_offsets.get(idx)
+                if not bounds:
+                    continue
+                start_sec, end_sec = bounds
+                start_idx = max(0, int(start_sec * sr))
+                end_idx = min(len(audio), int(end_sec * sr))
+                if end_idx <= start_idx:
+                    continue
+                chunks.append(audio[start_idx:end_idx])
+
+            if not chunks:
+                raise RuntimeError("Accepted-only SRT found no valid audio chunks")
+
+            import numpy as np
+
+            accepted_audio = np.concatenate(chunks)
+            accepted_path = vod_dir / f"{vod_slug}_srt_accepted.wav"
+            sf.write(str(accepted_path), accepted_audio, sr)
+            log_writer(
+                f"[i] Accepted-only SRT audio prepared: {accepted_path} "
+                f"(segments={len(sorted_indices)}/{len(kept_indices)})"
             )
-        finally:
-            transcribe_module.log = original_log
-            transcribe_module.log_ok = original_log_ok
+            return accepted_path
 
-        capture_log(f"Transcription result: media={result.get('media')} audio={result.get('audio_full')}")
-        srt_path = Path(result["srt"])
-        capture_log(f"SRT path: {srt_path}")
-        if not srt_path.exists():
-            raise HTTPException(status_code=500, detail="SRT file not created")
+        def execute_transcription(log_writer) -> dict:
+            log_writer(f"SRT start vod={vod_url} out_dir={vod_dir}")
 
-        srt_content = srt_path.read_text(encoding="utf-8")
-        lines = len([line for line in srt_content.split("\n") if "-->" in line])
-        excerpt = "\n".join(srt_content.split("\n")[:20])
+            speed_profiles = {
+                "fast": {"model": "small", "threads": 4, "compute_type": "float16", "progress_interval": 6.0},
+                "balanced": {"model": "medium", "threads": 6, "compute_type": "float16", "progress_interval": 8.0},
+                "accurate": {"model": "large-v3", "threads": 8, "compute_type": "float16", "progress_interval": 10.0},
+            }
+            selected_speed = request.speed if request.speed in speed_profiles else "balanced"
+            profile = speed_profiles[selected_speed]
+            transcription_override: Path | None = None
+            if request.acceptedOnly:
+                transcription_override = _prepare_accepted_only_audio(log_writer)
 
-        return RunSrtResponse(
-            path=to_workspace_relative(srt_path),
-            lines=lines,
-            excerpt=excerpt,
-            exitCode=0,
-            log=log_buffer,
-        )
+            log_writer(
+                f"SRT options: speed={selected_speed} model={profile['model']} "
+                f"threads={profile['threads']} acceptedOnly={request.acceptedOnly}"
+            )
+
+            import streamcraft.core.transcribe as transcribe_module
+            original_log = transcribe_module.log
+            original_log_ok = transcribe_module.log_ok
+            transcribe_module.log = log_writer
+            transcribe_module.log_ok = log_writer
+
+            try:
+                result = run_transcription(
+                    vod=vod_url,
+                    out_dir=vod_dir,
+                    model=profile["model"],
+                    language="auto",
+                    threads=profile["threads"],
+                    device="cuda",
+                    compute_type=profile["compute_type"],
+                    progress_interval=profile["progress_interval"],
+                    vod_quality="audio_only",
+                    mux_subs=False,
+                    also_vtt=False,
+                    also_txt=True,
+                    force=False,
+                    max_duration=None,
+                    transcription_audio_override=transcription_override,
+                )
+            finally:
+                transcribe_module.log = original_log
+                transcribe_module.log_ok = original_log_ok
+
+            log_writer(
+                f"Transcription result: media={result.get('media')} "
+                f"audio={result.get('audio')} audio_full={result.get('audio_full')}"
+            )
+            srt_path = Path(result["srt"])
+            log_writer(f"SRT path: {srt_path}")
+            if not srt_path.exists():
+                raise RuntimeError("SRT file not created")
+
+            srt_content = srt_path.read_text(encoding="utf-8")
+            lines = len([line for line in srt_content.split("\n") if "-->" in line])
+            if srt_path.stat().st_size == 0 or lines == 0:
+                raise RuntimeError(
+                    "SRT output is empty or invalid (0 subtitle lines). "
+                    "Transcription did not produce timed segments."
+                )
+
+            excerpt = "\n".join(srt_content.split("\n")[:20])
+            return {
+                "path": to_workspace_relative(srt_path),
+                "lines": lines,
+                "excerpt": excerpt,
+                "exitCode": 0,
+            }
+
+        if not request.stream:
+            result_payload = execute_transcription(capture_log)
+            return RunSrtResponse(
+                path=result_payload["path"],
+                lines=result_payload["lines"],
+                excerpt=result_payload["excerpt"],
+                exitCode=result_payload["exitCode"],
+                log=log_buffer,
+            )
+
+        events: queue.Queue[object] = queue.Queue()
+        sentinel = object()
+
+        def stream_log(msg: str) -> None:
+            capture_log(msg)
+            events.put(json.dumps({"type": "log", "line": log_buffer[-1]}))
+
+        def worker() -> None:
+            try:
+                result_payload = execute_transcription(stream_log)
+                events.put(json.dumps({"type": "done", "result": result_payload}))
+            except Exception as exc:
+                events.put(json.dumps({"type": "error", "error": f"Transcription failed: {exc}"}))
+            finally:
+                events.put(sentinel)
+
+        async def iterator():
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+
+            while True:
+                item = await asyncio.to_thread(events.get)
+                if item is sentinel:
+                    break
+                yield f"{item}\n"
+
+        return StreamingResponse(iterator(), media_type="application/x-ndjson")
 
     except Exception as exc:
         import traceback
@@ -1027,17 +1309,161 @@ async def run_tts(request: RunTtsRequest):
     try:
         from streamcraft.core.pipeline import resolve_output_dirs
         import subprocess
-        import sys
-        import asyncio
+        import shutil
+        from collections import defaultdict
+
+        settings = get_settings()
+        provider = (settings.tts_provider or "script").strip().lower()
+        if provider != "script":
+            raise HTTPException(
+                status_code=501,
+                detail=f"TTS provider '{provider}' is not implemented yet. Supported: script.",
+            )
 
         out_root = Path(request.outdir or "out")
         dataset_root = Path(request.datasetOut or "dataset")
         _, vod_dir, dataset_dir = resolve_output_dirs(request.vodUrl, out_root, dataset_root)
 
-        # dataset_dir already points to the streamer bucket
-        streamer_dataset = dataset_dir.resolve()
-        if not streamer_dataset.exists():
-            raise HTTPException(status_code=404, detail=f"Dataset not found for streamer: {request.streamer}")
+        streamer_slug = (request.streamer or "").strip().lower()
+        if not streamer_slug:
+            raise HTTPException(status_code=400, detail="Missing streamer value for TTS")
+
+        streamer_root = (dataset_root / streamer_slug).resolve()
+        if not streamer_root.exists():
+            raise HTTPException(status_code=404, detail=f"Streamer dataset root not found: {streamer_root}")
+
+        def resolve_target_dataset_path(path_value: str | None) -> Path | None:
+            if not path_value:
+                return None
+            candidate = Path(path_value)
+            if not candidate.is_absolute():
+                candidate = (WORKSPACE_ROOT / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            return candidate if candidate.exists() else None
+
+        def collect_source_clip_dirs() -> list[Path]:
+            dirs: list[Path] = []
+
+            if request.sourceMode == "target_dataset":
+                target_dataset = resolve_target_dataset_path(request.targetDatasetPath)
+                if target_dataset is None:
+                    raise HTTPException(status_code=400, detail="Target dataset not found for selected mode")
+                target_clips = target_dataset / "clips"
+                if target_clips.exists() and target_clips.is_dir():
+                    dirs.append(target_clips)
+                elif target_dataset.name == "clips" and target_dataset.is_dir():
+                    dirs.append(target_dataset)
+                else:
+                    raise HTTPException(status_code=400, detail=f"Target dataset has no clips directory: {target_dataset}")
+                return dirs
+
+            base_clips = streamer_root / "clips"
+            if base_clips.exists() and base_clips.is_dir():
+                dirs.append(base_clips)
+
+            runs_root = streamer_root / "runs"
+            if runs_root.exists() and runs_root.is_dir():
+                run_clip_dirs = sorted([p / "clips" for p in runs_root.iterdir() if p.is_dir()], reverse=True)
+                dirs.extend([clip_dir for clip_dir in run_clip_dirs if clip_dir.exists() and clip_dir.is_dir()])
+
+            if not dirs:
+                raise HTTPException(status_code=404, detail=f"No clips directories found for streamer: {request.streamer}")
+            return dirs
+
+        quality_profiles = {
+            "fast": {"clip_count": 8, "min_sec": 1.2, "max_sec": 8.0},
+            "balanced": {"clip_count": 16, "min_sec": 1.5, "max_sec": 10.0},
+            "best": {"clip_count": 32, "min_sec": 2.0, "max_sec": 12.0},
+        }
+        quality_mode = request.qualityPreset if request.qualityPreset in quality_profiles else "balanced"
+        profile = quality_profiles[quality_mode]
+
+        source_clip_dirs = collect_source_clip_dirs()
+
+        if request.acceptedOnly and request.sourceMode != "target_dataset":
+            review_dirs = sorted({p for p in streamer_root.rglob("clips_review") if p.is_dir()}, reverse=True)
+            if review_dirs:
+                source_clip_dirs = list(review_dirs)
+
+        def collect_candidates(clip_dirs: list[Path]) -> list[dict]:
+            candidates: list[dict] = []
+            for clip_dir in clip_dirs:
+                for clip_path in sorted(clip_dir.glob("*.wav")):
+                    try:
+                        duration = float(sf.info(str(clip_path)).duration)
+                    except Exception:
+                        duration = 0.0
+                    candidates.append({
+                        "path": clip_path.resolve(),
+                        "group": str(clip_dir.resolve()),
+                        "duration": duration,
+                    })
+            return candidates
+
+        candidates = collect_candidates(source_clip_dirs)
+        if not candidates:
+            raise HTTPException(status_code=404, detail="No speaker clips found for selected TTS source")
+
+        filtered = [
+            item for item in candidates
+            if profile["min_sec"] <= item["duration"] <= profile["max_sec"]
+        ]
+        pool = filtered if filtered else candidates
+
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        for item in pool:
+            grouped[item["group"]].append(item)
+        for group_items in grouped.values():
+            group_items.sort(key=lambda x: abs(float(x["duration"]) - 4.0))
+
+        group_keys = sorted(grouped.keys())
+        selected: list[dict] = []
+        clip_target = int(profile["clip_count"])
+
+        while len(selected) < clip_target and group_keys:
+            next_group_keys: list[str] = []
+            for group_key in group_keys:
+                if len(selected) >= clip_target:
+                    break
+                bucket = grouped[group_key]
+                if not bucket:
+                    continue
+                selected.append(bucket.pop(0))
+                if bucket:
+                    next_group_keys.append(group_key)
+            group_keys = next_group_keys
+
+        if len(selected) < clip_target:
+            selected_paths = {str(item["path"]) for item in selected}
+            remaining = sorted(pool, key=lambda x: abs(float(x["duration"]) - 4.0))
+            for item in remaining:
+                if len(selected) >= clip_target:
+                    break
+                key = str(item["path"])
+                if key in selected_paths:
+                    continue
+                selected.append(item)
+                selected_paths.add(key)
+
+        if not selected:
+            raise HTTPException(status_code=500, detail="Failed to select speaker clips for TTS")
+
+        temp_dataset_root = (WORKSPACE_ROOT / "temp" / "tts" / streamer_slug / datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")).resolve()
+        temp_clips_dir = temp_dataset_root / "clips"
+        temp_clips_dir.mkdir(parents=True, exist_ok=True)
+
+        prepared_paths: list[Path] = []
+        for idx, item in enumerate(selected, 1):
+            src_path = Path(item["path"])
+            dst_path = temp_clips_dir / f"{idx:04d}_{src_path.name}"
+            try:
+                os.link(src_path, dst_path)
+            except Exception:
+                shutil.copy2(src_path, dst_path)
+            prepared_paths.append(dst_path)
+
+        streamer_dataset = temp_dataset_root
 
         clips_dir = streamer_dataset / "clips"
         if not clips_dir.exists():
@@ -1050,9 +1476,16 @@ async def run_tts(request: RunTtsRequest):
         output_path = (tts_dir / f"tts_{request.streamer}_{timestamp}.wav").resolve()
 
         # Call the PowerShell TTS script
-        ps_script = WORKSPACE_ROOT / "scripts" / "tts-generate.ps1"
+        ps_script = Path(settings.tts_script_path).resolve() if settings.tts_script_path else (WORKSPACE_ROOT / "scripts" / "tts-generate.ps1")
         if not ps_script.exists():
-            raise HTTPException(status_code=500, detail="TTS generation script not found")
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"TTS generation script not found: {ps_script}. "
+                    "Step 7 requires an external XTTS generation script. "
+                    "Current pipeline prepares dataset clips in Step 6 but does not train a model checkpoint by itself."
+                ),
+            )
 
         cmd = [
             "pwsh",
@@ -1061,7 +1494,7 @@ async def run_tts(request: RunTtsRequest):
             "-File", str(ps_script),
             "-Text", request.text,
             "-SpeakerDataset", str(streamer_dataset),
-            "-SpeakerClipCount", "3",
+            "-SpeakerClipCount", str(len(prepared_paths)),
             "-OutputFile", str(output_path),
             "-Model", "xtts_v2",
             "-Language", "en"
@@ -1078,6 +1511,10 @@ async def run_tts(request: RunTtsRequest):
             add_log("Starting TTS generation...")
             add_log(f"Streamer dataset: {streamer_dataset}")
             add_log(f"Clips dir: {clips_dir}")
+            add_log(
+                f"TTS options: sourceMode={request.sourceMode} quality={quality_mode} "
+                f"acceptedOnly={request.acceptedOnly} selectedClips={len(prepared_paths)}"
+            )
             add_log(f"Text: {request.text}")
             add_log(f"Output: {output_path}")
             add_log(f"Running: {' '.join(cmd)}")
@@ -1102,6 +1539,7 @@ async def run_tts(request: RunTtsRequest):
             if result.returncode != 0:
                 error_msg = result.stderr or "TTS generation failed"
                 add_log(f"ERROR: {error_msg}")
+                shutil.rmtree(streamer_dataset, ignore_errors=True)
                 raise HTTPException(status_code=500, detail=error_msg)
 
             if not output_path.exists():
@@ -1110,9 +1548,13 @@ async def run_tts(request: RunTtsRequest):
                 if result.stderr:
                     lines = [ln for ln in result.stderr.split("\n") if ln.strip()]
                     err_tail = lines[-1] if lines else None
+                shutil.rmtree(streamer_dataset, ignore_errors=True)
                 raise HTTPException(status_code=500, detail=err_tail or "TTS output file not created")
 
             add_log(f"TTS generated successfully: {output_path}")
+
+            refresh_datasets_index(dataset_root, out_root, WORKSPACE_ROOT)
+            shutil.rmtree(streamer_dataset, ignore_errors=True)
 
             return RunTtsResponse(
                 outputPath=to_workspace_relative(output_path),
@@ -1126,34 +1568,74 @@ async def run_tts(request: RunTtsRequest):
             yield json.dumps({"type": "log", "line": f"[{start}] Starting TTS generation..."}) + "\n"
             yield json.dumps({"type": "log", "line": f"[{start}] Streamer dataset: {streamer_dataset}"}) + "\n"
             yield json.dumps({"type": "log", "line": f"[{start}] Clips dir: {clips_dir}"}) + "\n"
+            yield json.dumps({
+                "type": "log",
+                "line": (
+                    f"[{start}] TTS options: sourceMode={request.sourceMode} quality={quality_mode} "
+                    f"acceptedOnly={request.acceptedOnly} selectedClips={len(prepared_paths)}"
+                ),
+            }) + "\n"
             yield json.dumps({"type": "log", "line": f"[{start}] Text: {request.text}"}) + "\n"
             yield json.dumps({"type": "log", "line": f"[{start}] Output: {output_path}"}) + "\n"
             yield json.dumps({"type": "log", "line": f"[{start}] Running: {' '.join(cmd)}"}) + "\n"
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
+            events: queue.Queue[object] = queue.Queue()
+            sentinel = object()
 
-            assert process.stdout is not None
-            async for raw_line in process.stdout:
-                line = raw_line.decode(errors="ignore").rstrip("\n")
-                if line:
-                    yield json.dumps({"type": "log", "line": line}) + "\n"
+            def worker() -> None:
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
 
-            code = await process.wait()
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            clean = line.rstrip("\r\n")
+                            if clean:
+                                events.put(json.dumps({"type": "log", "line": clean}))
 
-            if not output_path.exists():
-                err_line = f"TTS output missing (code={code})"
-                yield json.dumps({"type": "error", "exitCode": code, "error": err_line}) + "\n"
-                return
+                    code = process.wait()
 
-            yield json.dumps({
-                "type": "done",
-                "exitCode": code,
-                "outputPath": to_workspace_relative(output_path),
-            }) + "\n"
+                    if code != 0:
+                        events.put(json.dumps({
+                            "type": "error",
+                            "exitCode": code,
+                            "error": f"TTS generation failed (code={code})",
+                        }))
+                        return
+
+                    if not output_path.exists():
+                        events.put(json.dumps({
+                            "type": "error",
+                            "exitCode": code,
+                            "error": f"TTS output missing (code={code})",
+                        }))
+                        return
+
+                    events.put(json.dumps({
+                        "type": "done",
+                        "exitCode": code,
+                        "outputPath": to_workspace_relative(output_path),
+                    }))
+                except Exception as exc:
+                    events.put(json.dumps({"type": "error", "error": f"TTS streaming failed: {exc}"}))
+                finally:
+                    shutil.rmtree(streamer_dataset, ignore_errors=True)
+                    events.put(sentinel)
+
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+
+            while True:
+                item = await asyncio.to_thread(events.get)
+                if item is sentinel:
+                    break
+                yield f"{item}\n"
 
         return StreamingResponse(stream_logs(), media_type="application/x-ndjson")
 
@@ -1161,6 +1643,56 @@ async def run_tts(request: RunTtsRequest):
         raise HTTPException(status_code=500, detail="TTS generation timed out")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {exc}")
+
+
+@router.get("/datasets/streamers", response_model=StreamerDatasetSummaryListResponse)
+async def list_dataset_streamers(
+    datasetOut: str = Query("dataset"),
+    outdir: str = Query("out"),
+    refresh: bool = Query(False),
+):
+    dataset_root = Path(datasetOut or "dataset")
+    out_root = Path(outdir or "out")
+    records = get_datasets_index(dataset_root, out_root, WORKSPACE_ROOT, refresh=refresh)
+    summaries = summarize_streamers(records)
+    return StreamerDatasetSummaryListResponse(
+        items=[StreamerDatasetSummaryResponse(**item) for item in summaries],
+        total=len(summaries),
+    )
+
+
+@router.get("/datasets", response_model=DatasetListResponse)
+async def list_datasets(
+    streamer: str | None = Query(None),
+    datasetOut: str = Query("dataset"),
+    outdir: str = Query("out"),
+    refresh: bool = Query(False),
+):
+    dataset_root = Path(datasetOut or "dataset")
+    out_root = Path(outdir or "out")
+    records = get_datasets_index(dataset_root, out_root, WORKSPACE_ROOT, refresh=refresh)
+    if streamer:
+        records = [item for item in records if str(item.get("streamer", "")).lower() == streamer.lower()]
+    return DatasetListResponse(
+        items=[DatasetRecordResponse(**item) for item in records],
+        total=len(records),
+    )
+
+
+@router.get("/datasets/{dataset_id}", response_model=DatasetRecordResponse)
+async def get_dataset_record(
+    dataset_id: str,
+    datasetOut: str = Query("dataset"),
+    outdir: str = Query("out"),
+    refresh: bool = Query(False),
+):
+    dataset_root = Path(datasetOut or "dataset")
+    out_root = Path(outdir or "out")
+    records = get_datasets_index(dataset_root, out_root, WORKSPACE_ROOT, refresh=refresh)
+    match = next((item for item in records if item.get("datasetId") == dataset_id), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return DatasetRecordResponse(**match)
 
 
 # Job Management Routes

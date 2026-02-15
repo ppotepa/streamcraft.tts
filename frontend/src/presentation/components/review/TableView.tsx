@@ -29,6 +29,7 @@ export interface TableViewSegment {
 export interface TableViewProps {
     segments: TableViewSegment[];
     selectedSegments: Set<number>;
+    currentPlayingSegmentId?: number | null;
     onSegmentSelect: (index: number, selected: boolean) => void;
     onSegmentDoubleClick: (segment: TableViewSegment) => void;
     onSegmentAction: (index: number, action: 'accept' | 'reject' | 'play') => void;
@@ -39,12 +40,25 @@ export interface TableViewProps {
 export const TableView: React.FC<TableViewProps> = ({
     segments,
     selectedSegments,
+    currentPlayingSegmentId,
     onSegmentSelect,
     onSegmentDoubleClick,
     onSegmentAction,
     onTextEdit,
     onSelectAll,
 }) => {
+    const tableContainerRef = React.useRef<HTMLDivElement | null>(null);
+
+    React.useEffect(() => {
+        if (currentPlayingSegmentId === null || currentPlayingSegmentId === undefined) {
+            return;
+        }
+        const container = tableContainerRef.current;
+        if (!container) return;
+        const row = container.querySelector(`tr[data-segment-id="${currentPlayingSegmentId}"]`) as HTMLTableRowElement | null;
+        row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, [currentPlayingSegmentId]);
+
     // Early return for empty state
     if (segments.length === 0) {
         return (
@@ -84,7 +98,7 @@ export const TableView: React.FC<TableViewProps> = ({
 
     return (
         <div className="table-view">
-            <div className="table-container">
+            <div className="table-container" ref={tableContainerRef}>
                 <table className="data-table">
                     <thead>
                         <tr>
@@ -111,99 +125,107 @@ export const TableView: React.FC<TableViewProps> = ({
                         </tr>
                     </thead>
                     <tbody>
-                        {segments.map((segment) => (
-                            <tr
-                                key={segment.index}
-                                className={selectedSegments.has(segment.index) ? 'selected' : ''}
-                                onDoubleClick={() => onSegmentDoubleClick(segment)}
-                            >
-                                <td className="cell-checkbox">
-                                    <input
-                                        type="checkbox"
-                                        className="checkbox"
-                                        checked={selectedSegments.has(segment.index)}
-                                        onChange={(e) => onSegmentSelect(segment.index, e.target.checked)}
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
-                                </td>
-                                <td className="cell-id">{segment.index}</td>
-                                <td className="cell-status">{getStatusBadge(segment)}</td>
-                                <td className="cell-time">
-                                    {formatTime(segment.start)} - {formatTime(segment.end)} ({segment.duration.toFixed(1)}s)
-                                </td>
-                                <td className="cell-text">
-                                    <div
-                                        className="text-content"
-                                        contentEditable
-                                        suppressContentEditableWarning
-                                        onBlur={(e) => onTextEdit(segment.index, e.currentTarget.textContent || '')}
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        {segment.text}
-                                    </div>
-                                </td>
-                                <td className="cell-metrics">
-                                    <div className="metrics-inline">
-                                        <div className="metric-item">
-                                            <span className="metric-label">Conf</span>
-                                            <span className={`metric-value ${getMetricClass(segment.confidence, 90)}`}>
-                                                {segment.confidence ? `${segment.confidence}%` : 'N/A'}
-                                            </span>
-                                        </div>
-                                        <div className="metric-item">
-                                            <span className="metric-label">SNR</span>
-                                            <span className={`metric-value ${getMetricClass(segment.snrDb, 15)}`}>
-                                                {segment.snrDb ? segment.snrDb.toFixed(1) : 'N/A'}
-                                            </span>
-                                        </div>
-                                        <div className="metric-item">
-                                            <span className="metric-label">Speech</span>
-                                            <span className={`metric-value ${getMetricClass(segment.speechRatio, 90)}`}>
-                                                {segment.speechRatio ? `${segment.speechRatio}%` : 'N/A'}
-                                            </span>
-                                        </div>
-                                        <div className="metric-item">
-                                            <span className="metric-label">Dur</span>
-                                            <span className="metric-value">{segment.duration.toFixed(1)}s</span>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="cell-actions">
-                                    <div className="action-buttons">
-                                        <button
-                                            className="icon-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onSegmentAction(segment.index, 'play');
-                                            }}
-                                            title="Play"
+                        {segments.map((segment) => {
+                            const statusClass = segment.kept === true ? 'row-kept' : segment.kept === false ? 'row-rejected' : '';
+                            const selectedClass = selectedSegments.has(segment.index) ? 'selected' : '';
+                            const playingClass = currentPlayingSegmentId === segment.index ? 'row-playing' : '';
+                            const combinedClass = [statusClass, selectedClass, playingClass].filter(Boolean).join(' ');
+
+                            return (
+                                <tr
+                                    key={segment.index}
+                                    data-segment-id={segment.index}
+                                    className={combinedClass}
+                                    onDoubleClick={() => onSegmentDoubleClick(segment)}
+                                >
+                                    <td className="cell-checkbox">
+                                        <input
+                                            type="checkbox"
+                                            className="checkbox"
+                                            checked={selectedSegments.has(segment.index)}
+                                            onChange={(e) => onSegmentSelect(segment.index, e.target.checked)}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    </td>
+                                    <td className="cell-id">{segment.index}</td>
+                                    <td className="cell-status">{getStatusBadge(segment)}</td>
+                                    <td className="cell-time">
+                                        {formatTime(segment.start)} - {formatTime(segment.end)} ({segment.duration.toFixed(1)}s)
+                                    </td>
+                                    <td className="cell-text">
+                                        <div
+                                            className="text-content"
+                                            contentEditable
+                                            suppressContentEditableWarning
+                                            onBlur={(e) => onTextEdit(segment.index, e.currentTarget.textContent || '')}
+                                            onClick={(e) => e.stopPropagation()}
                                         >
-                                            ▶
-                                        </button>
-                                        <button
-                                            className="icon-btn accept"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onSegmentAction(segment.index, 'accept');
-                                            }}
-                                            title="Accept"
-                                        >
-                                            ✓
-                                        </button>
-                                        <button
-                                            className="icon-btn reject"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onSegmentAction(segment.index, 'reject');
-                                            }}
-                                            title="Reject"
-                                        >
-                                            ✕
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
+                                            {segment.text}
+                                        </div>
+                                    </td>
+                                    <td className="cell-metrics">
+                                        <div className="metrics-inline">
+                                            <div className="metric-item">
+                                                <span className="metric-label">Conf</span>
+                                                <span className={`metric-value ${getMetricClass(segment.confidence, 90)}`}>
+                                                    {segment.confidence ? `${segment.confidence}%` : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="metric-item">
+                                                <span className="metric-label">SNR</span>
+                                                <span className={`metric-value ${getMetricClass(segment.snrDb, 15)}`}>
+                                                    {segment.snrDb ? segment.snrDb.toFixed(1) : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="metric-item">
+                                                <span className="metric-label">Speech</span>
+                                                <span className={`metric-value ${getMetricClass(segment.speechRatio, 90)}`}>
+                                                    {segment.speechRatio ? `${Math.round(segment.speechRatio)}%` : 'N/A'}
+                                                </span>
+                                            </div>
+                                            <div className="metric-item">
+                                                <span className="metric-label">Dur</span>
+                                                <span className="metric-value">{segment.duration.toFixed(1)}s</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="cell-actions">
+                                        <div className="action-buttons">
+                                            <button
+                                                className="icon-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSegmentAction(segment.index, 'play');
+                                                }}
+                                                title="Play"
+                                            >
+                                                ▶
+                                            </button>
+                                            <button
+                                                className="icon-btn accept"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSegmentAction(segment.index, 'accept');
+                                                }}
+                                                title="Accept"
+                                            >
+                                                ✓
+                                            </button>
+                                            <button
+                                                className="icon-btn reject"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSegmentAction(segment.index, 'reject');
+                                                }}
+                                                title="Reject"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>

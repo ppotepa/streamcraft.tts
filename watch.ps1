@@ -74,14 +74,14 @@ Write-Host "=======================================" -ForegroundColor DarkGray
 
 # Check Python venv
 $pythonExe = Join-Path $root ".venv\Scripts\python.exe"
-$uvicornExe = Join-Path $root ".venv\Scripts\uvicorn.exe"
 
 if (-not $FrontendOnly) {
     if (-not (Test-Path $pythonExe)) {
         Write-Host "Python venv not found" -ForegroundColor Red
         exit 1
     }
-    if (-not (Test-Path $uvicornExe)) {
+    & $pythonExe -m pip show uvicorn *> $null
+    if ($LASTEXITCODE -ne 0) {
         Write-Host "uvicorn not found, installing..." -ForegroundColor Yellow
         & $pythonExe -m pip install uvicorn[standard]
     }
@@ -121,18 +121,23 @@ $jobs = @()
 if (-not $FrontendOnly) {
     Write-Host "Starting backend watcher..." -ForegroundColor Yellow
     $backendJob = Start-Job -ScriptBlock {
-        param($backendDir, $uvicornExe, $hostname, $port)
+        param($backendDir, $pythonExe, $hostname, $port)
         $ErrorActionPreference = 'Continue'
         Set-Location $backendDir
+        $pythonScripts = Split-Path -Parent $pythonExe
+        $venvRoot = Split-Path -Parent $pythonScripts
+        $env:VIRTUAL_ENV = $venvRoot
+        $env:PATH = "$pythonScripts;$env:PATH"
+        $env:PYTHONHOME = ""
         $env:PYTHONUNBUFFERED = "1"
         # uvicorn with --reload watches Python files automatically
-        & $uvicornExe streamcraft.infrastructure.web.fastapi.app:app `
+        & $pythonExe -m uvicorn streamcraft.infrastructure.web.fastapi.app:app `
             --reload `
             --reload-dir streamcraft `
             --host $hostname `
             --port $port `
             --log-level info 2>&1
-    } -ArgumentList (Join-Path $root "backend"), $uvicornExe, $BackendHost, $BackendPort
+    } -ArgumentList (Join-Path $root "backend"), $pythonExe, $BackendHost, $BackendPort
     $jobs += $backendJob
     
     # Wait a moment and check if job started successfully

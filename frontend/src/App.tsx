@@ -6,6 +6,7 @@
 import { StrictMode } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { DependencyProvider } from './presentation/context/dependency-context';
+import { AudioPlayerProvider } from './presentation/context/audio-player.context';
 import { ErrorBoundary } from './presentation/shared/error-boundary';
 import { ToastProvider } from './presentation/shared/toast';
 import { MainLayout } from './presentation/layouts';
@@ -25,9 +26,11 @@ export const App = () => {
         <StrictMode>
             <ErrorBoundary>
                 <DependencyProvider>
-                    <ToastProvider>
-                        <RouterProvider router={router} />
-                    </ToastProvider>
+                    <AudioPlayerProvider>
+                        <ToastProvider>
+                            <RouterProvider router={router} />
+                        </ToastProvider>
+                    </AudioPlayerProvider>
                 </DependencyProvider>
             </ErrorBoundary>
         </StrictMode>

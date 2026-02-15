@@ -1,0 +1,246 @@
+Poniżej masz rozszerzony **Jira Task (roboczy, sprint-ready)** uwzględniający nowe wymagania: pełnoekranowy Manual Review, naprawę Timeline (strzałka + fullscreen), globalny single-instance player, waveform 1:1 z audio, Show Original, oraz synchronizację transkrypcji.
+
+---
+
+# 🧩 JIRA TASK
+
+**Title:** Manual Review & TTS Global Player Refactor – Fullscreen Modal, Single Audio Instance, Timeline Fixes, Waveform Accuracy
+
+**Type:** Task (UX/UI + Architecture Refactor)
+**Module:** TTS – Manual Review (Step 4)
+**Components:** ManualReviewPage, ReviewManager, TableView, TimelineView, FocusView, Global Player
+**Priority:** Critical
+**Status:** To Do
+
+---
+
+## 🎯 Cel
+
+Uspójnić i ustabilizować doświadczenie użytkownika w module Manual Review (ekran 4) poprzez:
+
+1. Uczynienie całego Manual Review pełnoekranowym modalem.
+2. Naprawę Timeline View (brakująca strzałka, fullscreen, animacja, playback).
+3. Wprowadzenie jednej, globalnej instancji playera audio dla całej aplikacji TTS.
+4. Synchronizację waveformu z realnym audio (1:1).
+5. Implementację poprawnie działającej funkcji “Show Original”.
+6. Wprowadzenie wizualizacji pełnej transkrypcji jako sekwencji wiadomości (chat-like).
+7. Eliminację możliwości równoległego odtwarzania wielu źródeł audio.
+
+---
+
+## 🏗 Zakres zmian
+
+---
+
+## 1️⃣ Manual Review jako pełnoekranowy modal
+
+**Aktualny stan:**
+ManualReviewPage renderuje zawartość w standardowym layoutcie strony.
+
+**Docelowy stan:**
+Manual Review (Step 4) powinien działać jako fullscreen modal overlay nad aplikacją TTS.
+
+### Wymagania:
+
+* 100% viewport width/height
+* brak widocznych layout ograniczeń
+* brak scrollowania strony pod spodem
+* zamknięcie → powrót do wizard flow
+
+**Plik:**
+`frontend/src/presentation/pages/manual-review/manual-review.page.tsx`
+
+---
+
+## 2️⃣ Timeline View – poprawki krytyczne
+
+### 🔹 Brakująca prawa strzałka
+
+Aktualnie renderowana jest tylko lewa strzałka nawigacji.
+
+**Do wykonania:**
+
+* przywrócić przycisk nawigacji w prawo
+* warunkowe renderowanie (disabled na ostatnim segmencie)
+* upewnić się, że nie jest ukrywana przez CSS / overflow / z-index
+
+**Plik:**
+`TimelineView.tsx`
+
+---
+
+### 🔹 Fullscreen Timeline
+
+Timeline ma zajmować cały ekran, nie fragment kontenera.
+
+**Do wykonania:**
+
+* zmienić wrapper CSS na fullscreen overlay
+* wyeliminować ograniczenia width w parent container
+* upewnić się, że `.timeline-view` ma 100vw / 100vh
+
+---
+
+### 🔹 Playback w Timeline
+
+Obecnie:
+
+* przycisk Play istnieje,
+* ale nie odtwarza realnie audio (stub w `ReviewManager.tsx`).
+
+**Do wykonania:**
+
+* podłączyć Play do globalnego playera
+* kliknięcie segmentu → player zmienia źródło audio
+* brak tworzenia lokalnych instancji audio
+
+---
+
+## 3️⃣ Global Single-Instance Player (Architektura)
+
+### 🎧 Założenie
+
+W całej aplikacji TTS ma istnieć **jedna instancja playera audio**.
+
+Nie wolno:
+
+* tworzyć nowych Audio() instancji w komponentach
+* pozwalać na równoległe odtwarzanie
+
+### 🔹 Player powinien:
+
+* być renderowany globalnie (np. w lewym górnym rogu)
+* działać niezależnie od aktualnego kroku wizard
+* przyjmować dynamicznie nowe źródło audio
+* obsługiwać play/pause/seek
+
+### 🔹 Każdy krok wizard (sanitize, extract, review itd.) musi:
+
+* używać tego samego playera
+* zmieniać jedynie aktualne źródło
+
+### 🔹 Implementacja sugerowana:
+
+* Context Provider (np. `AudioPlayerContext`)
+* jedna instancja `<audio>` w root layout
+* funkcja `setSource(url)` + `play()`
+
+---
+
+## 4️⃣ Synchronizacja waveform z realnym audio
+
+### Aktualny stan:
+
+* Timeline generuje waveform z AudioContext
+* FocusView używa placeholderowych słupków
+
+### Docelowo:
+
+* waveform musi odzwierciedlać dokładnie dane audio
+* pipeline z Timeline przenieść do FocusView
+* waveform pełnej szerokości
+* brak losowych placeholderów
+
+**Pliki:**
+
+* `TimelineView.tsx`
+* `FocusView.tsx`
+
+---
+
+## 5️⃣ Show Original – naprawa funkcji porównawczej
+
+### Kontekst:
+
+* Funkcja wywoływana przez podwójny klik w TableView
+* Ma porównywać:
+
+  * waveform oryginalnego audio
+  * waveform oczyszczonej wersji
+
+### Obecny stan:
+
+* funkcja nie działa
+
+### Do wykonania:
+
+* przywrócić mechanizm otwierania widoku porównawczego
+* wizualizacja dual waveform (original vs cleaned)
+* jasne oznaczenie który waveform jest który
+* możliwość odtwarzania obu przez globalny player (zmiana źródła, nie równoległe granie)
+
+**Plik:**
+`TableView.tsx`
+
+* ewentualny nowy komponent `ComparisonView.tsx`
+
+---
+
+## 6️⃣ Transkrypcja jako wizualizacja chat-like
+
+### Założenie:
+
+Pełna transkrypcja pliku audio powinna być przechowywana w pamięci.
+
+Segmenty to logiczne “wiadomości” w rozmowie.
+
+### Timeline:
+
+Gdy zmieniamy aktywny segment:
+
+* pod spodem powinien wyświetlać się aktualny stan transkrypcji
+* podświetlony aktualny segment
+* widok przewijalny
+
+### Implementacja:
+
+* przechowywać pełną transkrypcję w stanie nadrzędnym
+* Timeline przekazuje `activeSegmentId`
+* komponent `TranscriptView` renderuje listę segmentów jako chat messages
+
+---
+
+## 7️⃣ Eliminacja wielokrotnego odtwarzania
+
+### Kryterium architektoniczne:
+
+* Nigdy nie może istnieć więcej niż jeden aktywny odtwarzacz.
+* Zmiana segmentu → zmiana źródła w tym samym playerze.
+* Zmiana kroku wizard → ten sam player.
+
+To ma wyeliminować chaos i niespójność UX.
+
+---
+
+## 8️⃣ Kryteria akceptacji
+
+* [ ] Manual Review zajmuje 100% ekranu
+* [ ] Timeline zajmuje 100% ekranu
+* [ ] Obie strzałki nawigacyjne działają
+* [ ] Play działa w Timeline
+* [ ] Play działa w TableView
+* [ ] Play działa w wcześniejszych krokach wizard
+* [ ] Istnieje tylko jedna instancja playera
+* [ ] Waveform 1:1 z audio
+* [ ] Show Original działa poprawnie
+* [ ] Transkrypcja wyświetlana w trybie chat-like
+* [ ] Brak równoległego odtwarzania
+
+---
+
+## 📌 Efekt końcowy
+
+System TTS powinien mieć:
+
+* spójną architekturę audio,
+* stabilny fullscreen review flow,
+* realistyczny waveform,
+* czytelną wizualizację transkrypcji,
+* przewidywalne interakcje bez chaosu audio.
+
+---
+
+Jeśli chcesz, mogę teraz:
+
+* rozbić to na osobne Epic + 4 Tasks,
+* albo rozpisać techniczny plan implementacji krok po kroku pod konkretną kolejność commitów.

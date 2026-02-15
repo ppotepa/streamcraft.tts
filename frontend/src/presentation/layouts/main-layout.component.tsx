@@ -40,17 +40,14 @@ export const MainLayout = () => {
                             <Link to="/wizard" className={linkClass('/wizard')}>
                                 Wizard
                             </Link>
-                            <Link to="/review" className={linkClass('/review')}>
-                                Review
-                            </Link>
                             <Link to="/jobs" className={linkClass('/jobs')}>
                                 Jobs
                             </Link>
                             <Link to="/datasets" className={linkClass('/datasets')}>
                                 Datasets
                             </Link>
-                            <Link to="/audio" className={linkClass('/audio')}>
-                                Audio
+                            <Link to="/tts" className={linkClass('/tts')}>
+                                TTS
                             </Link>
                             <Link to="/settings" className={linkClass('/settings')}>
                                 Settings

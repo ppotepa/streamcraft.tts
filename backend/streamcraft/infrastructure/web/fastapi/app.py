@@ -1,5 +1,9 @@
 """FastAPI application factory."""
 
+import os
+import platform
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -47,6 +51,43 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         """Health check endpoint."""
         return {"status": "ok"}
+
+    @app.on_event("startup")
+    async def startup_runtime_self_check() -> None:
+        exe = sys.executable
+        py_ver = platform.python_version()
+        venv = os.environ.get("VIRTUAL_ENV") or "(not set)"
+        print(f"[self-check] python={exe}")
+        print(f"[self-check] python_version={py_ver} virtual_env={venv}")
+
+        fw_version = "unavailable"
+        try:
+            import faster_whisper
+
+            fw_version = getattr(faster_whisper, "__version__", "unknown")
+        except Exception as exc:
+            print(f"[self-check] faster_whisper=unavailable reason={exc}")
+
+        try:
+            import ctranslate2
+
+            ct2_ver = getattr(ctranslate2, "__version__", "unknown")
+            if hasattr(ctranslate2, "get_cuda_device_count"):
+                cuda_count = ctranslate2.get_cuda_device_count()
+                cuda_ready = cuda_count > 0
+            elif hasattr(ctranslate2, "has_cuda"):
+                cuda_ready = bool(ctranslate2.has_cuda())
+                cuda_count = "unknown"
+            else:
+                cuda_ready = False
+                cuda_count = "unknown"
+
+            print(
+                f"[self-check] ctranslate2={ct2_ver} faster_whisper={fw_version} "
+                f"cuda_ready={cuda_ready} cuda_count={cuda_count}"
+            )
+        except Exception as exc:
+            print(f"[self-check] ctranslate2=unavailable faster_whisper={fw_version} reason={exc}")
 
     return app
 

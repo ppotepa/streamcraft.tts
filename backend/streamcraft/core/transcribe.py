@@ -90,15 +90,27 @@ class LiveSubtitleWriter:
 
 
 def log(msg: str):
-    print(f"[i] {msg}")
+    _safe_print(f"[i] {msg}")
 
 
 def log_ok(msg: str):
-    print(f"[OK] {msg}")
+    _safe_print(f"[OK] {msg}")
 
 
 def log_warn(msg: str):
-    print(f"[!] {msg}")
+    _safe_print(f"[!] {msg}")
+
+
+def _safe_print(message: str, flush: bool = False):
+    try:
+        print(message, flush=flush)
+    except UnicodeEncodeError:
+        stdout = getattr(sys, "stdout", None)
+        if stdout is None:
+            return
+        safe = message.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        stdout.buffer.write((safe + "\n").encode("utf-8", errors="replace"))
+        stdout.flush()
 
 
 def ensure_ffmpeg() -> None:
@@ -347,9 +359,9 @@ def transcribe(
     last_emit = 0.0
     seg_list = []
 
-    print("\n" + "="*80)
-    print(f"{'TIMESTAMP':<20} | MESSAGE")
-    print("="*80)
+    log("=" * 80)
+    log(f"{'TIMESTAMP':<20} | MESSAGE")
+    log("=" * 80)
 
     for seg in segments:
         cleaned = (seg.text or "").strip()
@@ -364,8 +376,8 @@ def transcribe(
         end_ts = format_timestamp(seg.end)
         timestamp = f"{start_ts} -> {end_ts}"
         
-        # Print segment in real-time
-        print(f"{timestamp:<20} | {cleaned}")
+        # Emit segment line through logger so API stream receives it
+        log(f"{timestamp:<20} | {cleaned}")
 
         if limit is not None and seg.end >= limit:
             log_warn(f"Reached max-duration limit ({limit:.1f}s); stopping early")
@@ -375,10 +387,10 @@ def transcribe(
             seen = seg.end
             if seen - last_emit >= progress_interval or seen >= total:
                 pct = min(100.0, seen / total * 100.0)
-                print(f"[progress] {seen:8.1f}s / {total:8.1f}s ({pct:5.1f}%)", flush=True)
+                log(f"[progress] {seen:8.1f}s / {total:8.1f}s ({pct:5.1f}%)")
                 last_emit = seen
 
-    print("="*80)
+    log("=" * 80)
     log_ok(f"Transcribed {len(seg_list)} segments")
     processed = seg_list[-1].end if seg_list else 0.0
     meta = {
@@ -396,6 +408,37 @@ def save_metadata(meta: Dict, path: Path):
     path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
+def select_transcription_audio(out_dir: Path, media_stem: str, audio_full_path: Path) -> Path:
+    """Pick the best available audio source for transcription.
+
+    Preference order:
+    1) <stem>_vocals.wav (explicit isolated vocals)
+    2) <stem>_clean.wav (sanitized/cleaned speech)
+    3) vocals/*(Vocals)*.wav (UVR / separator artifacts)
+    4) <stem>_full.wav (fallback)
+    """
+
+    explicit_vocals = (out_dir / f"{media_stem}_vocals.wav").resolve()
+    if explicit_vocals.exists() and explicit_vocals.stat().st_size > 0:
+        log(f"[i] Using isolated vocals for transcription: {explicit_vocals}")
+        return explicit_vocals
+
+    clean_audio = (out_dir / f"{media_stem}_clean.wav").resolve()
+    if clean_audio.exists() and clean_audio.stat().st_size > 0:
+        log(f"[i] Using clean audio for transcription: {clean_audio}")
+        return clean_audio
+
+    vocals_dir = (out_dir / "vocals").resolve()
+    if vocals_dir.exists() and vocals_dir.is_dir():
+        candidates = sorted(vocals_dir.rglob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for candidate in candidates:
+            if "vocal" in candidate.name.lower() and candidate.stat().st_size > 0:
+                log(f"[i] Using separator vocals for transcription: {candidate}")
+                return candidate.resolve()
+
+    return audio_full_path
+
+
 def run_transcription(
     vod: str,
     out_dir: Path,
@@ -411,6 +454,7 @@ def run_transcription(
     also_txt: bool,
     force: bool,
     max_duration: Optional[float],
+    transcription_audio_override: Optional[Path] = None,
 ):
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -421,7 +465,15 @@ def run_transcription(
         if not media_path.exists():
             raise FileNotFoundError(f"Media file not found: {media_path}")
 
-    audio_full_path, audio_path = extract_audio(media_path, out_dir, force=force)
+    audio_full_path, _ = extract_audio(media_path, out_dir, force=force)
+    if transcription_audio_override is not None:
+        override_path = Path(transcription_audio_override).expanduser().resolve()
+        if not override_path.exists() or override_path.stat().st_size == 0:
+            raise FileNotFoundError(f"Transcription override audio missing or empty: {override_path}")
+        audio_path = override_path
+        log(f"[i] Using overridden transcription audio: {audio_path}")
+    else:
+        audio_path = select_transcription_audio(out_dir, media_path.stem, audio_full_path)
 
     srt_path = out_dir / f"{media_path.stem}.srt"
     vtt_path = out_dir / f"{media_path.stem}.vtt"
@@ -459,37 +511,54 @@ def run_transcription(
             raise
 
     if not force and srt_path.exists():
-        log_warn(f"SRT exists, skipping transcription: {srt_path}")
-    else:
-        writer = None
+        existing_text = ""
         try:
-            segments, meta, writer = run_once(device, compute_type)
+            existing_text = srt_path.read_text(encoding="utf-8")
         except Exception:
-            cleanup_partial_outputs()
-            raise
-        finally:
-            if writer:
-                writer.close()
+            existing_text = ""
 
-        if not writer.has_srt:
-            write_srt(segments, srt_path)
-        meta["srt"] = str(srt_path)
+        if srt_path.stat().st_size > 0 and "-->" in existing_text:
+            log_warn(f"SRT exists, skipping transcription: {srt_path}")
+            return {
+                "media": str(media_path),
+                "audio": str(audio_path),
+                "audio_full": str(audio_full_path),
+                "srt": str(srt_path),
+                "out_dir": str(out_dir),
+            }
 
-        if also_vtt:
-            if not writer.has_vtt:
-                write_vtt(segments, vtt_path)
-            meta["vtt"] = str(vtt_path)
+        log_warn(f"SRT exists but is empty/invalid, regenerating: {srt_path}")
+        cleanup_partial_outputs()
 
-        if also_txt:
-            if not writer.has_txt:
-                write_txt(segments, txt_path)
-            meta["txt"] = str(txt_path)
+    writer = None
+    try:
+        segments, meta, writer = run_once(device, compute_type)
+    except Exception:
+        cleanup_partial_outputs()
+        raise
+    finally:
+        if writer:
+            writer.close()
 
-        meta["audio"] = str(audio_path)
-        meta["audio_full"] = str(audio_full_path)
-        meta["media"] = str(media_path)
-        save_metadata(meta, meta_path)
-        log_ok(f"Saved SRT to {srt_path}")
+    if not writer.has_srt:
+        write_srt(segments, srt_path)
+    meta["srt"] = str(srt_path)
+
+    if also_vtt:
+        if not writer.has_vtt:
+            write_vtt(segments, vtt_path)
+        meta["vtt"] = str(vtt_path)
+
+    if also_txt:
+        if not writer.has_txt:
+            write_txt(segments, txt_path)
+        meta["txt"] = str(txt_path)
+
+    meta["audio"] = str(audio_path)
+    meta["audio_full"] = str(audio_full_path)
+    meta["media"] = str(media_path)
+    save_metadata(meta, meta_path)
+    log_ok(f"Saved SRT to {srt_path}")
 
     if mux_subs:
         subbed = out_dir / f"{media_path.stem}_subbed.mp4"

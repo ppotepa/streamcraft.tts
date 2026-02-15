@@ -7,16 +7,24 @@ import { createContext, useContext, useState, useCallback, ReactNode } from 'rea
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+export interface ToastOptions {
+    id?: string;
+    busy?: boolean;
+    onClick?: () => void;
+}
+
 export interface Toast {
     id: string;
     type: ToastType;
     message: string;
     duration?: number;
+    busy?: boolean;
+    onClick?: () => void;
 }
 
 interface ToastContextValue {
     toasts: Toast[];
-    showToast: (type: ToastType, message: string, duration?: number) => void;
+    showToast: (type: ToastType, message: string, duration?: number, options?: ToastOptions) => string;
     removeToast: (id: string) => void;
 }
 
@@ -42,17 +50,33 @@ export const ToastProvider = ({ children }: ToastProviderProps) => {
     }, []);
 
     const showToast = useCallback(
-        (type: ToastType, message: string, duration: number = 5000) => {
-            const id = `toast-${Date.now()}-${Math.random()}`;
-            const toast: Toast = { id, type, message, duration };
+        (type: ToastType, message: string, duration: number = 5000, options?: ToastOptions) => {
+            const id = options?.id ?? `toast-${Date.now()}-${Math.random()}`;
+            const toast: Toast = {
+                id,
+                type,
+                message,
+                duration,
+                busy: options?.busy,
+                onClick: options?.onClick,
+            };
 
-            setToasts((prev) => [...prev, toast]);
+            setToasts((prev) => {
+                const existingIndex = prev.findIndex((item) => item.id === id);
+                if (existingIndex === -1) {
+                    return [...prev, toast];
+                }
+                const next = [...prev];
+                next[existingIndex] = toast;
+                return next;
+            });
 
             if (duration > 0) {
                 setTimeout(() => {
                     removeToast(id);
                 }, duration);
             }
+            return id;
         },
         [removeToast]
     );
@@ -92,17 +116,19 @@ const ToastMessage = ({ toast, onRemove }: ToastMessageProps) => {
         const base =
             'flex items-start p-4 rounded-lg shadow-lg border animate-slide-in-right';
 
+        const interactive = toast.onClick ? ' cursor-pointer hover:opacity-90 transition-opacity' : '';
+
         switch (toast.type) {
             case 'success':
-                return `${base} bg-green-50 border-green-200 text-green-800`;
+                return `${base} bg-green-50 border-green-200 text-green-800${interactive}`;
             case 'error':
-                return `${base} bg-red-50 border-red-200 text-red-800`;
+                return `${base} bg-red-50 border-red-200 text-red-800${interactive}`;
             case 'warning':
-                return `${base} bg-yellow-50 border-yellow-200 text-yellow-800`;
+                return `${base} bg-yellow-50 border-yellow-200 text-yellow-800${interactive}`;
             case 'info':
-                return `${base} bg-blue-50 border-blue-200 text-blue-800`;
+                return `${base} bg-blue-50 border-blue-200 text-blue-800${interactive}`;
             default:
-                return `${base} bg-gray-50 border-gray-200 text-gray-800`;
+                return `${base} bg-gray-50 border-gray-200 text-gray-800${interactive}`;
         }
     };
 
@@ -122,11 +148,18 @@ const ToastMessage = ({ toast, onRemove }: ToastMessageProps) => {
     };
 
     return (
-        <div className={getStyles()} role="alert">
-            <span className="text-xl mr-3">{getIcon()}</span>
+        <div
+            className={getStyles()}
+            role="alert"
+            onClick={() => toast.onClick?.()}
+        >
+            <span className={`text-xl mr-3 ${toast.busy ? 'animate-spin' : ''}`}>{toast.busy ? '⟳' : getIcon()}</span>
             <p className="flex-1 text-sm font-medium">{toast.message}</p>
             <button
-                onClick={() => onRemove(toast.id)}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onRemove(toast.id);
+                }}
                 className="ml-3 text-gray-400 hover:text-gray-600 transition-colors"
                 aria-label="Close"
             >

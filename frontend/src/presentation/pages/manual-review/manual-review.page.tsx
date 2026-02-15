@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { config } from '../../../config';
 import { ReviewManager, FocusViewSegment } from '../../components/review';
+import '../../components/review/review-views.css';
 
 type SegmentItem = {
     index: number;
@@ -16,6 +17,7 @@ type SegmentItem = {
     cleanStart?: number | null;
     cleanEnd?: number | null;
     kept?: boolean | null;
+    text?: string | null;
     quality?: number | null;
     speechRatio?: number | null;
     snrDb?: number | null;
@@ -255,16 +257,18 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
 
     // Map SegmentItem to FocusViewSegment for ReviewManager
     const mapToReviewSegment = useCallback((segment: SegmentItem): FocusViewSegment => {
-        const cleanAudioUrl = cleanPath ? getArtifactUrl(cleanPath.replace('.wav', `_${segment.index}.wav`)) : undefined;
-        const originalAudioUrl = originalPath ? getArtifactUrl(originalPath.replace('.wav', `_${segment.index}.wav`)) : undefined;
+        const cleanAudioUrl = cleanPath ? getArtifactUrl(cleanPath) : undefined;
+        const originalAudioUrl = originalPath ? getArtifactUrl(originalPath) : undefined;
 
         return {
             index: segment.index,
             start: segment.start,
             end: segment.end,
             duration: segment.duration,
-            text: `Segment ${segment.index}`,
-            confidence: segment.quality ? segment.quality * 10 : undefined,
+            cleanStart: segment.cleanStart ?? null,
+            cleanEnd: segment.cleanEnd ?? null,
+            text: segment.text || `Segment ${segment.index}`,
+            confidence: segment.quality ?? undefined,
             snrDb: segment.snrDb ?? undefined,
             speechRatio: segment.speechRatio ? segment.speechRatio * 100 : undefined,
             kept: segment.kept ?? null,

@@ -106,6 +106,11 @@ $backendJob = Start-Job -ScriptBlock {
     param($backendDir, $pythonExe, $hostname, $port)
     $ErrorActionPreference = 'Continue'
     Set-Location $backendDir
+    $pythonScripts = Split-Path -Parent $pythonExe
+    $venvRoot = Split-Path -Parent $pythonScripts
+    $env:VIRTUAL_ENV = $venvRoot
+    $env:PATH = "$pythonScripts;$env:PATH"
+    $env:PYTHONHOME = ""
     $env:PYTHONUNBUFFERED = "1"
     & $pythonExe -m uvicorn streamcraft.infrastructure.web.fastapi.app:app --reload --host $hostname --port $port 2>&1
 } -ArgumentList (Join-Path $root "backend"), $pythonExe, $BackendHost, $BackendPort

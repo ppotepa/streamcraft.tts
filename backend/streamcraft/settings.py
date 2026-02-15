@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     merge_gap_ms: int = 300
     clip_aac_bitrate: int = 320
     use_demucs: bool = False
+
+    # TTS provider
+    tts_provider: str = "script"  # script | python | remote
+    tts_script_path: str = ""
     
     # External API credentials
     twitch_client_id: str = ""

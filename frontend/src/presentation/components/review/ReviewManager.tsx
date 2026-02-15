@@ -2,9 +2,9 @@
  * Review Manager Component - Integrates TableView, FocusView, and TimelineView
  * 
  * This component demonstrates how to integrate the three review views:
- * - TableView: Main grid interface for bulk operations
+ * - TableView: Main grid interface for bulk operations (always visible)
  * - FocusView: Modal for deep-dive single-segment review
- * - TimelineView: Alternative horizontal scrolling timeline
+ * - TimelineView: Fullscreen modal for horizontal slot-machine style review
  * 
  * @requires CSS: Import 'review-views.css' in your parent component or main app file
  * @example
@@ -13,12 +13,11 @@
  * import { ReviewManager } from '@/presentation/components/review';
  * ```
  */
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { TableView, TableViewSegment } from './TableView';
 import { FocusView, FocusViewSegment } from './FocusView';
 import { TimelineView, TimelineSegment } from './TimelineView';
-
-type ViewMode = 'table' | 'timeline';
+import { useAudioPlayer } from '../../context/audio-player.context';
 
 export interface ReviewManagerProps {
     segments: FocusViewSegment[]; // Use FocusViewSegment as it has all fields
@@ -31,9 +30,57 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
     onSegmentUpdate,
     onSegmentAction,
 }) => {
-    const [viewMode, setViewMode] = useState<ViewMode>('table');
     const [selectedSegments, setSelectedSegments] = useState<Set<number>>(new Set());
     const [focusedSegmentIndex, setFocusedSegmentIndex] = useState<number | null>(null);
+    const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+    const { playSegment, currentSegmentId } = useAudioPlayer();
+
+    const reviewPlaylist = segments
+        .map((segment) => {
+            const cleanStart = segment.cleanStart;
+            const cleanEnd = segment.cleanEnd;
+            const originalStart = segment.start;
+            const originalEnd = segment.end;
+
+            const hasCleanWindow = Number.isFinite(cleanStart) && Number.isFinite(cleanEnd) && (cleanEnd as number) > (cleanStart as number);
+            const hasOriginalWindow = Number.isFinite(originalStart) && Number.isFinite(originalEnd) && originalEnd > originalStart;
+
+            if (segment.kept !== false && segment.cleanAudioUrl && hasCleanWindow) {
+                return {
+                    id: segment.index,
+                    src: segment.cleanAudioUrl,
+                    label: `Segment #${segment.index}`,
+                    startAt: cleanStart as number,
+                    endAt: cleanEnd as number,
+                };
+            }
+
+            if (segment.originalAudioUrl && hasOriginalWindow) {
+                return {
+                    id: segment.index,
+                    src: segment.originalAudioUrl,
+                    label: `Segment #${segment.index}`,
+                    startAt: originalStart,
+                    endAt: originalEnd,
+                };
+            }
+
+            if (!segment.cleanAudioUrl) {
+                return null;
+            }
+
+            const fallbackStart = Number.isFinite(cleanStart) ? (cleanStart as number) : 0;
+            const fallbackEnd = Number.isFinite(segment.duration) ? fallbackStart + segment.duration : undefined;
+
+            return {
+                id: segment.index,
+                src: segment.cleanAudioUrl,
+                label: `Segment #${segment.index}`,
+                startAt: fallbackStart,
+                endAt: Number.isFinite(fallbackEnd) ? fallbackEnd : undefined,
+            };
+        })
+        .filter((item): item is { id: number; src: string; label: string; startAt: number; endAt?: number } => item !== null);
 
     // Handle segment selection
     const handleSelectSegment = (index: number, selected: boolean) => {
@@ -79,7 +126,7 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
     };
 
     // Handle segment actions
-    const handleSegmentAction = (index: number, action: 'accept' | 'reject' | 'play' | 'edit' | 'skip') => {
+    const handleSegmentAction = useCallback((index: number, action: 'accept' | 'reject' | 'play' | 'edit' | 'skip') => {
         if (action === 'accept') {
             onSegmentAction(index, 'accept');
             onSegmentUpdate(index, { kept: true });
@@ -89,17 +136,21 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
         } else if (action === 'skip') {
             onSegmentAction(index, 'skip');
         } else if (action === 'play') {
-            // Handle playback - integrate with existing Waveform component or audio player
-            // You can dispatch to your audio player here
-            const segment = segments.find(seg => seg.index === index);
-            if (segment?.cleanAudioUrl) {
-                // Example: playAudioFile(segment.cleanAudioUrl);
+            const playlistItem = reviewPlaylist.find((item) => item.id === index);
+            if (playlistItem) {
+                void playSegment({
+                    context: isTimelineOpen ? 'timeline' : 'review',
+                    playlist: reviewPlaylist,
+                    segmentId: index,
+                    autoplay: true,
+                    startAt: playlistItem.startAt,
+                });
             }
         } else if (action === 'edit') {
             // Open in focus view for editing
             setFocusedSegmentIndex(index);
         }
-    };
+    }, [segments, onSegmentAction, onSegmentUpdate, playSegment, reviewPlaylist, isTimelineOpen]);
 
     // Handle text editing
     const handleTextEdit = (index: number, newText: string) => {
@@ -115,18 +166,18 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
 
     return (
         <div className="review-manager">
-            {/* View Mode Switcher */}
+            {/* Header with actions */}
             <div style={{
                 display: 'flex',
                 gap: '12px',
                 marginBottom: '24px',
                 padding: '16px',
-                backgroundColor: '#1a1e26',
+                backgroundColor: '#161b26',
                 borderRadius: '8px',
                 alignItems: 'center'
             }}>
                 <div style={{ flex: 1 }}>
-                    <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#e3e8f0' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.25rem', color: '#e7e9ee' }}>
                         Manual Review
                     </h2>
                     <p style={{ margin: '4px 0 0', fontSize: '0.875rem', color: '#a3adbf' }}>
@@ -137,20 +188,11 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
                     <button
                         className="action-btn"
                         style={{
-                            backgroundColor: viewMode === 'table' ? '#4a9eff' : '#1a1e26',
-                            color: viewMode === 'table' ? 'white' : '#a3adbf'
+                            backgroundColor: '#161b26',
+                            color: '#78fff8',
+                            borderColor: 'rgba(120, 255, 248, 0.3)'
                         }}
-                        onClick={() => setViewMode('table')}
-                    >
-                        📊 Table View
-                    </button>
-                    <button
-                        className="action-btn"
-                        style={{
-                            backgroundColor: viewMode === 'timeline' ? '#4a9eff' : '#1a1e26',
-                            color: viewMode === 'timeline' ? 'white' : '#a3adbf'
-                        }}
-                        onClick={() => setViewMode('timeline')}
+                        onClick={() => setIsTimelineOpen(true)}
                     >
                         📅 Timeline View
                     </button>
@@ -183,24 +225,31 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
                 )}
             </div>
 
-            {/* Main View */}
-            {viewMode === 'table' && (
-                <TableView
-                    segments={segments}
-                    selectedSegments={selectedSegments}
-                    onSegmentSelect={handleSelectSegment}
-                    onSelectAll={handleSelectAll}
-                    onSegmentDoubleClick={handleOpenFocus}
-                    onSegmentAction={handleSegmentAction}
-                    onTextEdit={handleTextEdit}
-                />
-            )}
+            {/* Table View - Always Rendered */}
+            <TableView
+                segments={segments}
+                selectedSegments={selectedSegments}
+                currentPlayingSegmentId={currentSegmentId}
+                onSegmentSelect={handleSelectSegment}
+                onSelectAll={handleSelectAll}
+                onSegmentDoubleClick={handleOpenFocus}
+                onSegmentAction={handleSegmentAction}
+                onTextEdit={handleTextEdit}
+            />
 
-            {viewMode === 'timeline' && (
+            {/* Timeline View Modal */}
+            {isTimelineOpen && (
                 <TimelineView
                     segments={segments}
+                    currentPlayingSegmentId={currentSegmentId}
                     onSegmentClick={handleOpenFocus}
                     onSegmentAction={handleSegmentAction}
+                    onClose={() => setIsTimelineOpen(false)}
+                    transcriptSegments={segments.map((segment) => ({
+                        index: segment.index,
+                        text: segment.text,
+                        kept: segment.kept ?? null,
+                    }))}
                 />
             )}
 

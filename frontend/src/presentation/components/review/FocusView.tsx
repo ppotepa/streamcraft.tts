@@ -2,7 +2,7 @@
  * Focus View Modal - Immersive single-segment review with original comparison
  * 
  * Full-screen modal for detailed segment review with:
- * - Large waveform visualization
+ * - Large waveform visualization (real audio data)
  * - Collapsible original audio comparison
  * - Keyboard shortcuts (A/R/S/O/Space/Arrows/Esc)
  * - Playback speed controls (0.5x - 1.5x)
@@ -11,13 +11,16 @@
  * 
  * @component
  */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useAudioPlayer } from '../../context/audio-player.context';
 
 export interface FocusViewSegment {
     index: number;
     start: number;
     end: number;
     duration: number;
+    cleanStart?: number | null;
+    cleanEnd?: number | null;
     text: string;
     confidence?: number;
     snrDb?: number;
@@ -55,13 +58,26 @@ export const FocusView: React.FC<FocusViewProps> = ({
     onClose,
     onTextEdit,
 }) => {
-    const [showOriginal, setShowOriginal] = useState(false);
+    const [showOriginal, setShowOriginal] = useState(true);
     const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
-    const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
-    const cleanAudioRef = useRef<HTMLAudioElement | null>(null);
-    const originalAudioRef = useRef<HTMLAudioElement | null>(null);
+    const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
+    const [isLoadingWaveform, setIsLoadingWaveform] = useState(false);
+    const [originalWaveformPeaks, setOriginalWaveformPeaks] = useState<number[]>([]);
+    const [isLoadingOriginalWaveform, setIsLoadingOriginalWaveform] = useState(false);
     const textRef = useRef<HTMLDivElement | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const {
+        src: playerSrc,
+        currentTime: playerTime,
+        isPlaying,
+        setSource,
+        toggle,
+        setPlaybackRate,
+    } = useAudioPlayer();
+
+    const WAVEFORM_BARS = 60;
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -69,26 +85,142 @@ export const FocusView: React.FC<FocusViewProps> = ({
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const togglePlayback = () => {
-        const audio = cleanAudioRef.current;
-        if (!audio) return;
-
-        if (isPlaying) {
-            audio.pause();
-        } else {
-            audio.play();
+    const extractWaveformPeaks = useCallback(async (audioUrl: string) => {
+        if (!audioUrl || typeof window === 'undefined') {
+            return null;
         }
-        setIsPlaying(!isPlaying);
+
+        try {
+            const response = await fetch(audioUrl, {
+                signal: abortControllerRef.current?.signal
+            });
+            if (!response.ok) throw new Error('Failed to fetch audio');
+
+            const arrayBuffer = await response.arrayBuffer();
+
+            if (!audioContextRef.current) {
+                const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                if (!AudioContextClass) throw new Error('AudioContext not supported');
+                audioContextRef.current = new AudioContextClass();
+            }
+
+            const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+            const channelData = audioBuffer.numberOfChannels > 0
+                ? audioBuffer.getChannelData(0)
+                : new Float32Array();
+
+            // Extract peaks
+            const sliceSize = Math.max(1, Math.floor(channelData.length / WAVEFORM_BARS));
+            const peaks: number[] = [];
+
+            for (let i = 0; i < WAVEFORM_BARS; i++) {
+                const start = i * sliceSize;
+                if (start >= channelData.length) {
+                    peaks.push(0);
+                    continue;
+                }
+                const end = i === WAVEFORM_BARS - 1
+                    ? channelData.length
+                    : Math.min(channelData.length, start + sliceSize);
+
+                let max = 0;
+                for (let j = start; j < end; j++) {
+                    const sample = Math.abs(channelData[j]);
+                    if (sample > max) max = sample;
+                }
+                peaks.push(max);
+            }
+
+            // Normalize peaks
+            const maxPeak = Math.max(...peaks) || 1;
+            return peaks.map(peak => (peak / maxPeak) * 100);
+        } catch (error) {
+            if ((error as Error).name !== 'AbortError') {
+                console.error('Failed to extract waveform:', error);
+            }
+            return null;
+        }
+    }, [WAVEFORM_BARS]);
+
+    const createFallbackPeaks = useCallback((segmentIndex: number) => {
+        return Array.from({ length: WAVEFORM_BARS }, (_, i) => {
+            const x = (segmentIndex * 7 + i * 13) % 100;
+            return 20 + (x % 70);
+        });
+    }, [WAVEFORM_BARS]);
+
+    // Load waveform when segment changes
+    useEffect(() => {
+        if (!segment.cleanAudioUrl) {
+            setWaveformPeaks([]);
+        } else {
+            setIsLoadingWaveform(true);
+            abortControllerRef.current?.abort();
+            abortControllerRef.current = new AbortController();
+
+            extractWaveformPeaks(segment.cleanAudioUrl).then((peaks) => {
+                if (peaks) {
+                    setWaveformPeaks(peaks);
+                } else {
+                    setWaveformPeaks(createFallbackPeaks(segment.index));
+                }
+                setIsLoadingWaveform(false);
+            });
+        }
+
+        if (!segment.originalAudioUrl) {
+            setOriginalWaveformPeaks([]);
+        } else {
+            setIsLoadingOriginalWaveform(true);
+            extractWaveformPeaks(segment.originalAudioUrl).then((peaks) => {
+                if (peaks) {
+                    setOriginalWaveformPeaks(peaks);
+                } else {
+                    setOriginalWaveformPeaks(createFallbackPeaks(segment.index + 97));
+                }
+                setIsLoadingOriginalWaveform(false);
+            });
+        }
+
+        return () => {
+            abortControllerRef.current?.abort();
+        };
+    }, [segment.cleanAudioUrl, segment.originalAudioUrl, segment.index, extractWaveformPeaks, createFallbackPeaks]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            abortControllerRef.current?.abort();
+            audioContextRef.current?.close?.();
+        };
+    }, []);
+
+    const togglePlayback = () => {
+        if (segment.cleanAudioUrl && playerSrc !== segment.cleanAudioUrl) {
+            void setSource(segment.cleanAudioUrl, {
+                autoplay: true,
+                label: `Segment #${segment.index} (clean)`,
+                startAt: Number.isFinite(segment.cleanStart) ? (segment.cleanStart as number) : 0,
+                endAt: Number.isFinite(segment.cleanEnd) ? (segment.cleanEnd as number) : undefined,
+            });
+            return;
+        }
+        void toggle();
+    };
+
+    const playOriginal = () => {
+        if (!segment.originalAudioUrl) return;
+        void setSource(segment.originalAudioUrl, {
+            autoplay: true,
+            label: `Segment #${segment.index} (original)`,
+            startAt: Number.isFinite(segment.start) ? segment.start : 0,
+            endAt: Number.isFinite(segment.end) ? segment.end : undefined,
+        });
     };
 
     const handleSpeedChange = (speed: number) => {
         setPlaybackSpeed(speed);
-        if (cleanAudioRef.current) {
-            cleanAudioRef.current.playbackRate = speed;
-        }
-        if (originalAudioRef.current) {
-            originalAudioRef.current.playbackRate = speed;
-        }
+        setPlaybackRate(speed);
     };
 
     const handleTextBlur = () => {
@@ -146,20 +278,14 @@ export const FocusView: React.FC<FocusViewProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [showOriginal, onAccept, onReject, onSkip, onPrevious, onNext, onClose]);
 
-    // Update current time
+    // Track playhead only when focused segment clean source is active
     useEffect(() => {
-        const audio = cleanAudioRef.current;
-        if (!audio) return;
-
-        const updateTime = () => setCurrentTime(audio.currentTime);
-        audio.addEventListener('timeupdate', updateTime);
-        audio.addEventListener('ended', () => setIsPlaying(false));
-
-        return () => {
-            audio.removeEventListener('timeupdate', updateTime);
-            audio.removeEventListener('ended', () => setIsPlaying(false));
-        };
-    }, []);
+        if (segment.cleanAudioUrl && playerSrc === segment.cleanAudioUrl) {
+            setCurrentTime(playerTime);
+        } else {
+            setCurrentTime(0);
+        }
+    }, [segment.cleanAudioUrl, playerSrc, playerTime]);
 
     const progress = ((segment.index - 1) / totalSegments) * 100;
 
@@ -208,12 +334,15 @@ export const FocusView: React.FC<FocusViewProps> = ({
                                 </div>
                                 <div className="section-content">
                                     <div className="waveform-placeholder original-wave">
-                                        {/* Placeholder for original waveform */}
-                                        <div className="wave-bars">
-                                            {[40, 55, 70, 85, 90, 75, 65, 80, 95, 100, 90, 75, 60, 50].map((h, i) => (
-                                                <div key={i} className="wave-bar" style={{ height: `${h}%` }} />
-                                            ))}
-                                        </div>
+                                        {isLoadingOriginalWaveform ? (
+                                            <div className="wave-loading">Loading original waveform...</div>
+                                        ) : (
+                                            <div className="wave-bars">
+                                                {(originalWaveformPeaks.length > 0 ? originalWaveformPeaks : Array(WAVEFORM_BARS).fill(50)).map((h, i) => (
+                                                    <div key={i} className="wave-bar" style={{ height: `${Math.max(10, h)}%` }} />
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="metrics-row">
                                         <div className="metric-item">
@@ -231,10 +360,10 @@ export const FocusView: React.FC<FocusViewProps> = ({
                                         <div className="metric-item">
                                             <span className="metric-label">Speech</span>
                                             <span className="metric-value medium">
-                                                {segment.originalSpeechRatio || 'N/A'}%
+                                                {segment.originalSpeechRatio ? Math.round(segment.originalSpeechRatio) : 'N/A'}%
                                             </span>
                                         </div>
-                                        <button className="play-btn-mini original-play">▶</button>
+                                        <button className="play-btn-mini original-play" onClick={playOriginal}>▶</button>
                                     </div>
                                     {segment.snrDb && segment.originalSnrDb && (
                                         <div className="improvement-indicator">
@@ -275,7 +404,7 @@ export const FocusView: React.FC<FocusViewProps> = ({
                                     <div className="stat-item">
                                         <span className="stat-label">Speech</span>
                                         <span className={`stat-value ${(segment.speechRatio || 0) >= 90 ? 'good' : ''}`}>
-                                            {segment.speechRatio || 'N/A'}%
+                                            {segment.speechRatio ? Math.round(segment.speechRatio) : 'N/A'}%
                                         </span>
                                     </div>
                                 </div>
@@ -284,12 +413,18 @@ export const FocusView: React.FC<FocusViewProps> = ({
                             {/* Waveform */}
                             <div className="waveform-section">
                                 <div className="waveform-placeholder cleaned-wave">
-                                    <div className="wave-bars">
-                                        {[50, 65, 80, 90, 95, 85, 70, 75, 90, 100, 95, 85, 70, 60].map((h, i) => (
-                                            <div key={i} className="wave-bar" style={{ height: `${h}%` }} />
-                                        ))}
-                                    </div>
-                                    <div className="playhead" style={{ left: '35%' }} />
+                                    {isLoadingWaveform ? (
+                                        <div className="wave-loading">Loading waveform...</div>
+                                    ) : (
+                                        <div className="wave-bars">
+                                            {(waveformPeaks.length > 0 ? waveformPeaks : Array(WAVEFORM_BARS).fill(50)).map((height, i) => (
+                                                <div key={i} className="wave-bar" style={{ height: `${Math.max(10, height)}%` }} />
+                                            ))}
+                                        </div>
+                                    )}
+                                    {segment.cleanAudioUrl && !isLoadingWaveform && (
+                                        <div className="playhead" style={{ left: `${(currentTime / segment.duration) * 100}%` }} />
+                                    )}
                                 </div>
                                 <div className="waveform-controls">
                                     <div className="playback-controls">
@@ -363,14 +498,6 @@ export const FocusView: React.FC<FocusViewProps> = ({
                         →
                     </button>
                 </div>
-
-                {/* Audio elements */}
-                {segment.cleanAudioUrl && (
-                    <audio ref={cleanAudioRef} src={segment.cleanAudioUrl} />
-                )}
-                {segment.originalAudioUrl && (
-                    <audio ref={originalAudioRef} src={segment.originalAudioUrl} />
-                )}
             </div>
         </div>
     );

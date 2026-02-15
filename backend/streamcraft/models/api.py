@@ -176,6 +176,7 @@ class SegmentManifestItem(BaseModel):
     cleanStart: Optional[float] = None
     cleanEnd: Optional[float] = None
     kept: Optional[bool] = None
+    text: Optional[str] = None
     quality: Optional[int] = None
     speechRatio: Optional[float] = None
     snrDb: Optional[float] = None
@@ -200,6 +201,9 @@ class SegmentManifestResponse(BaseModel):
 class RunSrtRequest(BaseModel):
     """SRT transcription request."""
     vodUrl: str
+    stream: bool = False
+    speed: Literal["accurate", "balanced", "fast"] = "balanced"
+    acceptedOnly: bool = True
 
 
 class RunSrtResponse(BaseModel):
@@ -219,6 +223,10 @@ class RunTtsRequest(BaseModel):
     text: str
     streamer: str
     stream: bool = False
+    sourceMode: Literal["all_streamer", "target_dataset"] = "all_streamer"
+    targetDatasetPath: Optional[str] = None
+    qualityPreset: Literal["fast", "balanced", "best"] = "balanced"
+    acceptedOnly: bool = False
 
 
 class RunTtsResponse(BaseModel):
@@ -243,6 +251,7 @@ class RunTrainRequest(BaseModel):
     clipAacBitrate: int = 256
     threads: int = 4
     force: bool = True
+    stream: bool = False
 
 
 class RunTrainResponse(BaseModel):
@@ -313,3 +322,45 @@ class TranscribeSegmentWord(BaseModel):
     start: float
     end: float
     probability: float
+
+
+class DatasetRecordResponse(BaseModel):
+    """Unified dataset/run record for streamer dataset browser."""
+    datasetId: str
+    streamer: str
+    runId: Optional[str] = None
+    status: str
+    createdAt: Optional[str] = None
+    vodUrl: Optional[str] = None
+    vodId: Optional[str] = None
+    datasetPath: str
+    clipsPath: Optional[str] = None
+    clipsCount: int = 0
+    manifestPath: Optional[str] = None
+    segmentsPath: Optional[str] = None
+    latestTtsPath: Optional[str] = None
+    hasTrainArtifacts: bool = False
+    hasTtsArtifacts: bool = False
+    params: dict = {}
+    stats: dict = {}
+
+
+class DatasetListResponse(BaseModel):
+    """List of dataset records."""
+    items: List[DatasetRecordResponse]
+    total: int
+
+
+class StreamerDatasetSummaryResponse(BaseModel):
+    """Summary of dataset availability per streamer."""
+    streamer: str
+    datasets: int
+    runs: int
+    latestRunAt: Optional[str] = None
+    latestTtsPath: Optional[str] = None
+
+
+class StreamerDatasetSummaryListResponse(BaseModel):
+    """List of streamer dataset summaries."""
+    items: List[StreamerDatasetSummaryResponse]
+    total: int
