@@ -13,7 +13,7 @@
  * import { ReviewManager } from '@/presentation/components/review';
  * ```
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { TableView, TableViewSegment } from './TableView';
 import { FocusView, FocusViewSegment } from './FocusView';
 import { TimelineView, TimelineSegment } from './TimelineView';
@@ -33,7 +33,13 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
     const [selectedSegments, setSelectedSegments] = useState<Set<number>>(new Set());
     const [focusedSegmentIndex, setFocusedSegmentIndex] = useState<number | null>(null);
     const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+    const [showAcceptedOnly, setShowAcceptedOnly] = useState(false);
     const { playSegment, currentSegmentId } = useAudioPlayer();
+
+    const tableSegments = useMemo(
+        () => (showAcceptedOnly ? segments.filter((segment) => segment.kept === true) : segments),
+        [segments, showAcceptedOnly]
+    );
 
     const reviewPlaylist = segments
         .map((segment) => {
@@ -97,7 +103,7 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
 
     const handleSelectAll = (selected: boolean) => {
         if (selected) {
-            setSelectedSegments(new Set(segments.map((seg) => seg.index)));
+            setSelectedSegments(new Set(tableSegments.map((seg) => seg.index)));
         } else {
             setSelectedSegments(new Set());
         }
@@ -181,9 +187,20 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
                         Manual Review
                     </h2>
                     <p style={{ margin: '4px 0 0', fontSize: '0.875rem', color: '#a3adbf' }}>
-                        {segments.length} segments • {selectedSegments.size} selected
+                        {tableSegments.length} shown • {segments.length} total • {selectedSegments.size} selected
                     </p>
                 </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a3adbf', fontSize: '0.875rem' }}>
+                    <input
+                        type="checkbox"
+                        checked={showAcceptedOnly}
+                        onChange={(event) => {
+                            setShowAcceptedOnly(event.target.checked);
+                            setSelectedSegments(new Set());
+                        }}
+                    />
+                    Show accepted only
+                </label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                         className="action-btn"
@@ -227,7 +244,7 @@ export const ReviewManager: React.FC<ReviewManagerProps> = ({
 
             {/* Table View - Always Rendered */}
             <TableView
-                segments={segments}
+                segments={tableSegments}
                 selectedSegments={selectedSegments}
                 currentPlayingSegmentId={currentSegmentId}
                 onSegmentSelect={handleSelectSegment}

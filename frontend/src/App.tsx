@@ -19,7 +19,11 @@ const router = createBrowserRouter([
         element: <MainLayout />,
         children: routes,
     },
-]);
+], {
+    future: {
+        v7_startTransition: true,
+    },
+});
 
 export const App = () => {
     return (

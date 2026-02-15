@@ -145,6 +145,8 @@ try {
     Write-Host "[tts-script] Python: $pythonExe"
     Write-Host "[tts-script] Speaker dataset: $datasetPath"
     Write-Host "[tts-script] Using clips: $($selectedClips.Count)"
+    Write-Host "[tts-script] Request: device=$Device cpuThreads=$CpuThreads cudaBenchmark=$CudaBenchmark speakerClipCount=$SpeakerClipCount"
+    Write-Host "[tts-script] Sampling: temperature=$Temperature topP=$TopP topK=$TopK speed=$Speed repetitionPenalty=$RepetitionPenalty lengthPenalty=$LengthPenalty"
     Write-Host "[tts-script] Output: $OutputFile"
 
     $pythonCode = @'
@@ -242,9 +244,10 @@ if device == "cuda":
 model_name = f"tts_models/multilingual/multi-dataset/{model}"
 
 print(f"[tts-script] device={device}")
+print(f"[tts-script] requested_device={requested_device}")
 print(f"[tts-script] model={model_name}")
 print(f"[tts-script] language={language}")
-print(f"[tts-script] speaker_wavs={len(speaker_wavs)}")
+print(f"[tts-script] speaker_wavs={len(speaker_wavs)} requested={clip_count} available={len(clips)}")
 
 tts = TTS(model_name=model_name, progress_bar=False)
 tts = tts.to(device)
@@ -273,12 +276,21 @@ optional_values = {
     "length_penalty": length_penalty,
 }
 
+applied_optional = {}
+ignored_optional = {}
+
 for key, value in optional_values.items():
     if value is None:
         continue
     if allowed and key not in allowed:
+        ignored_optional[key] = value
         continue
     base_kwargs[key] = value
+    applied_optional[key] = value
+
+print(f"[tts-script] optional_applied={applied_optional}")
+if ignored_optional:
+    print(f"[tts-script] optional_ignored_unsupported={ignored_optional}")
 
 tts.tts_to_file(**base_kwargs)
 

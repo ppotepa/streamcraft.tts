@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -43,11 +44,12 @@ class Settings(BaseSettings):
     twitch_client_secret: str = ""
     youtube_api_key: str = ""
     
-    class Config:
-        env_prefix = "STREAMCRAFT_"
-        case_sensitive = False
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = ConfigDict(
+        env_prefix="STREAMCRAFT_",
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
 
 _settings: Optional[Settings] = None

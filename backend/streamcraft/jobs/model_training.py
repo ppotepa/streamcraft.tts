@@ -45,7 +45,7 @@ _cancelled: set[str] = set()
 
 
 def _now() -> str:
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
 
 
 def _ensure_file() -> None:
@@ -72,7 +72,7 @@ def _save() -> None:
 
 def _append_log(job: Dict[str, Any], line: str) -> None:
     logs = list(job.get("log") or [])
-    stamp = datetime.datetime.utcnow().strftime("%H:%M:%S")
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%H:%M:%S")
     logs.append(f"[{stamp}] {line}")
     job["log"] = logs[-500:]
 
@@ -318,7 +318,7 @@ def enqueue_training_job(*, run_id: str, vod_url: str, streamer_slug: str, check
         "epochs": int(epochs),
         "progress": 0,
         "error": None,
-        "log": [f"[{datetime.datetime.utcnow().strftime('%H:%M:%S')}] Job queued"],
+        "log": [f"[{datetime.datetime.now(datetime.UTC).strftime('%H:%M:%S')}] Job queued"],
     }
     with _lock:
         _jobs[job_id] = record

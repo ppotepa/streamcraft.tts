@@ -928,7 +928,7 @@ def run_sanitise_v2(
 		
 		metadata = RunMetadata(
 			run_id=run_id or "default",
-			created_at=datetime.utcnow().isoformat(),
+			created_at=datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
 			vod_url=vod_url,
 			streamer=streamer,
 			vod_identifier=vod_identifier,
@@ -957,7 +957,7 @@ def run_sanitise_v2(
 			),
 			segments_manifest=manifest_path.name,
 			clean_audio=clean_path.name,
-			completed_at=datetime.utcnow().isoformat(),
+			completed_at=datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
 		)
 		
 		save_run_metadata(dataset_dir, metadata)

@@ -361,6 +361,11 @@ class TranscribeSegmentRequest(BaseModel):
     vodUrl: str
     runId: Optional[str] = None
     segmentIndex: int
+    segmentStart: Optional[float] = None
+    segmentEnd: Optional[float] = None
+    cleanStart: Optional[float] = None
+    cleanEnd: Optional[float] = None
+    kept: Optional[bool] = None
     outdir: str = "out"
     datasetOut: str = "dataset"
 

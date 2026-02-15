@@ -64,7 +64,7 @@ def fallback_vod_slug(vod: str) -> str:
 
 def generate_run_id() -> str:
     """Generate a collision-resistant run identifier."""
-    return datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f") + f"_{secrets.token_hex(4)}"
+    return datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S_%f") + f"_{secrets.token_hex(4)}"
 
 
 def resolve_output_dirs(

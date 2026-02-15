@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from streamcraft.api import routes
+from streamcraft.api.router import api_router
 from streamcraft.settings import get_settings
 
 settings = get_settings()
@@ -31,7 +31,7 @@ app.add_middleware(
 )
 
 # Include routes
-app.include_router(routes.router, prefix="/api")
+app.include_router(api_router, prefix="/api")
 
 
 @app.get("/")

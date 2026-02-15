@@ -98,6 +98,21 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
     const [autoReviewMessage, setAutoReviewMessage] = useState<string | null>(null);
     const [autoReviewProgress, setAutoReviewProgress] = useState(0);
     const [autoReviewProgressText, setAutoReviewProgressText] = useState('');
+    const [autoReviewConfidenceThreshold, setAutoReviewConfidenceThreshold] = useState(() => {
+        const stored = localStorage.getItem('reviewAutoConfidenceThreshold');
+        const value = Number(stored);
+        return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 85;
+    });
+    const [autoReviewSpeechThreshold, setAutoReviewSpeechThreshold] = useState(() => {
+        const stored = localStorage.getItem('reviewAutoSpeechThreshold');
+        const value = Number(stored);
+        return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 85;
+    });
+    const [rerunSrtRunning, setRerunSrtRunning] = useState(false);
+    const [rerunSrtMessage, setRerunSrtMessage] = useState<string | null>(null);
+    const [rerunSrtProgress, setRerunSrtProgress] = useState(0);
+    const [rerunSrtProgressText, setRerunSrtProgressText] = useState('');
+    const [rerunSrtCurrentTranscript, setRerunSrtCurrentTranscript] = useState('');
 
     const votesRef = useRef<Record<number, 'accept' | 'reject'>>({});
 
@@ -186,6 +201,14 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
     useEffect(() => {
         votesRef.current = votes;
     }, [votes]);
+
+    useEffect(() => {
+        localStorage.setItem('reviewAutoConfidenceThreshold', String(autoReviewConfidenceThreshold));
+    }, [autoReviewConfidenceThreshold]);
+
+    useEffect(() => {
+        localStorage.setItem('reviewAutoSpeechThreshold', String(autoReviewSpeechThreshold));
+    }, [autoReviewSpeechThreshold]);
 
 
     const summary = useMemo(() => {
@@ -408,6 +431,34 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
         }
     };
 
+    const fetchAllSegmentsForReview = useCallback(async (): Promise<SegmentItem[]> => {
+        const allSegments: SegmentItem[] = [];
+        const chunkSize = 500;
+        let offset = 0;
+        let expectedTotal = totalSegments || segments.length;
+
+        while (true) {
+            const response = await fetch(
+                `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${offset}&limit=${chunkSize}${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`
+            );
+            const payload: SegmentManifestResponse = await response.json();
+            if (!response.ok) {
+                throw new Error((payload as { detail?: string }).detail || 'Failed to load segments');
+            }
+
+            const batch = payload.segments || [];
+            expectedTotal = payload.total ?? expectedTotal;
+            allSegments.push(...batch);
+
+            if (!payload.hasMore || batch.length === 0 || allSegments.length >= expectedTotal) {
+                break;
+            }
+            offset += chunkSize;
+        }
+
+        return allSegments;
+    }, [baseUrl, runId, segments.length, totalSegments, vodUrl]);
+
     const handleAutomaticReview = useCallback(async (): Promise<void> => {
         if (!vodUrl || !segments.length) return;
 
@@ -418,38 +469,15 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
         setError(null);
 
         try {
-            const allSegments: SegmentItem[] = [];
-            const chunkSize = 500;
-            let offset = 0;
-            let expectedTotal = totalSegments || segments.length;
+            const allSegments = await fetchAllSegmentsForReview();
+            const expectedTotal = allSegments.length;
 
-            while (true) {
-                const response = await fetch(
-                    `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${offset}&limit=${chunkSize}${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`
-                );
-                const payload: SegmentManifestResponse = await response.json();
-                if (!response.ok) {
-                    throw new Error((payload as { detail?: string }).detail || 'Failed to load segments for automatic review');
-                }
-
-                const batch = payload.segments || [];
-                expectedTotal = payload.total ?? expectedTotal;
-                allSegments.push(...batch);
-
-                const loaded = allSegments.length;
-                const ratio = expectedTotal > 0 ? Math.min(100, Math.round((loaded / expectedTotal) * 100)) : 0;
-                setAutoReviewProgress(Math.max(5, ratio));
-                setAutoReviewProgressText(`Analyzing segments ${loaded}/${expectedTotal}...`);
-
-                if (!payload.hasMore || batch.length === 0) {
-                    break;
-                }
-                offset += chunkSize;
-            }
+            setAutoReviewProgress(Math.max(5, expectedTotal > 0 ? 35 : 5));
+            setAutoReviewProgressText(`Analyzing segments ${expectedTotal}/${expectedTotal}...`);
 
             const nextVotes: Record<number, 'accept' | 'reject'> = {};
-            const confidenceThreshold = 85;
-            const speechThreshold = 85;
+            const confidenceThreshold = Math.max(0, Math.min(100, autoReviewConfidenceThreshold));
+            const speechThreshold = Math.max(0, Math.min(100, autoReviewSpeechThreshold));
 
             for (const segment of allSegments) {
                 const confidence = Number(segment.quality ?? 0);
@@ -503,7 +531,9 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
             setReviewMeta(data);
             const accepted = Object.values(nextVotes).filter((vote) => vote === 'accept').length;
             const rejected = Object.values(nextVotes).filter((vote) => vote === 'reject').length;
-            setAutoReviewMessage(`Automatic review saved: accepted ${accepted}, rejected ${rejected}`);
+            setAutoReviewMessage(
+                `Automatic review saved (confidence ≥ ${confidenceThreshold}%, speech ≥ ${speechThreshold}%): accepted ${accepted}, rejected ${rejected}`
+            );
             setAutoReviewProgress(100);
             setAutoReviewProgressText('Automatic review completed');
         } catch (err) {
@@ -513,7 +543,135 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
         } finally {
             setAutoReviewRunning(false);
         }
-    }, [baseUrl, notes, runId, segments.length, totalSegments, vodUrl]);
+    }, [
+        autoReviewConfidenceThreshold,
+        autoReviewSpeechThreshold,
+        baseUrl,
+        fetchAllSegmentsForReview,
+        notes,
+        runId,
+        vodUrl,
+    ]);
+
+    const handleRerunSrt = useCallback(async (): Promise<void> => {
+        if (!vodUrl) return;
+        if (!runId) {
+            setError('runId is required to rerun SRT from review.');
+            return;
+        }
+
+        setRerunSrtRunning(true);
+        setRerunSrtMessage(null);
+        setRerunSrtProgress(0);
+        setRerunSrtProgressText('Loading segments...');
+        setRerunSrtCurrentTranscript('');
+        setError(null);
+
+        try {
+            const allSegments = await fetchAllSegmentsForReview();
+            const acceptedSegments = allSegments
+                .filter((segment) => segment.kept === true)
+                .sort((left, right) => left.index - right.index);
+
+            if (acceptedSegments.length === 0) {
+                throw new Error('No accepted (green) segments found for SRT rerun.');
+            }
+
+            let completed = 0;
+
+            for (const segment of acceptedSegments) {
+                const position = completed + 1;
+                setRerunSrtProgressText(`Transcribing accepted segment ${position}/${acceptedSegments.length} (#${segment.index})...`);
+                setRerunSrtCurrentTranscript('');
+
+                const response = await fetch(`${baseUrl}/legacy/srt/transcribe-segment`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        vodUrl,
+                        runId,
+                        segmentIndex: segment.index,
+                        segmentStart: segment.start,
+                        segmentEnd: segment.end,
+                        cleanStart: segment.cleanStart ?? undefined,
+                        cleanEnd: segment.cleanEnd ?? undefined,
+                        kept: segment.kept ?? undefined,
+                    }),
+                });
+
+                if (!response.ok || !response.body) {
+                    const payload = await response.json().catch(() => ({}));
+                    throw new Error((payload as { detail?: string }).detail || 'Segment transcription failed');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let transcript = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() ?? '';
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed) continue;
+
+                        const evt = JSON.parse(trimmed) as {
+                            type?: string;
+                            word?: string;
+                            text?: string;
+                            message?: string;
+                        };
+
+                        if (evt.type === 'error') {
+                            throw new Error(evt.message || 'Segment transcription error');
+                        }
+
+                        if (evt.type === 'word' && evt.word) {
+                            transcript = `${transcript}${transcript.length > 0 ? ' ' : ''}${evt.word}`.trim();
+                            setRerunSrtCurrentTranscript(transcript);
+                        }
+
+                        if (evt.type === 'segment' && evt.text) {
+                            transcript = `${transcript}${transcript.length > 0 ? ' ' : ''}${evt.text}`.trim();
+                            setRerunSrtCurrentTranscript(transcript);
+                        }
+                    }
+                }
+
+                if (transcript.trim().length > 0) {
+                    setSegments((prev) =>
+                        prev.map((row) =>
+                            row.index === segment.index
+                                ? {
+                                    ...row,
+                                    text: transcript.trim(),
+                                }
+                                : row
+                        )
+                    );
+                }
+
+                completed += 1;
+                setRerunSrtProgress(Math.min(100, Math.round((completed / acceptedSegments.length) * 100)));
+            }
+
+            setRerunSrtProgressText('Accepted-only SRT rerun completed');
+            setRerunSrtMessage(`Accepted-only rerun completed for ${acceptedSegments.length} segments.`);
+        } catch (err) {
+            const message = (err as Error).message;
+            setError(message);
+            setRerunSrtMessage(message);
+            setRerunSrtProgressText('Accepted-only SRT rerun failed');
+        } finally {
+            setRerunSrtRunning(false);
+        }
+    }, [baseUrl, fetchAllSegmentsForReview, runId, vodUrl]);
 
     const handleExport = async (): Promise<void> => {
         if (!vodUrl) return;
@@ -590,6 +748,34 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
                         )}
                     </div>
                     <div className="review-actions">
+                        <label className="text-xs text-slate-300 flex items-center gap-2">
+                            Auto confidence %
+                            <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={autoReviewConfidenceThreshold}
+                                onChange={(event) => {
+                                    const value = Number(event.target.value);
+                                    setAutoReviewConfidenceThreshold(Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0);
+                                }}
+                                className="w-20 rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
+                            />
+                        </label>
+                        <label className="text-xs text-slate-300 flex items-center gap-2">
+                            Auto speech %
+                            <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={autoReviewSpeechThreshold}
+                                onChange={(event) => {
+                                    const value = Number(event.target.value);
+                                    setAutoReviewSpeechThreshold(Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0);
+                                }}
+                                className="w-20 rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
+                            />
+                        </label>
                         <button
                             type="button"
                             onClick={handleLoad}
@@ -613,6 +799,15 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
                             title="Apply intelligent accept/reject decisions and save review automatically"
                         >
                             {autoReviewRunning ? 'Auto reviewing...' : 'Automatic Review'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleRerunSrt}
+                            disabled={rerunSrtRunning || saving || !runId}
+                            className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            title="Rerun SRT transcription for current run"
+                        >
+                            {rerunSrtRunning ? 'Rerunning SRT...' : 'Rerun SRT'}
                         </button>
                         <button
                             type="button"
@@ -640,6 +835,9 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
                     </div>
                     {autoReviewMessage && (
                         <div className="text-xs text-slate-400 mt-2">{autoReviewMessage}</div>
+                    )}
+                    {rerunSrtMessage && (
+                        <div className="text-xs text-slate-400 mt-1">{rerunSrtMessage}</div>
                     )}
                 </div>
 
@@ -750,8 +948,8 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
                                         onClick={() => fetchSegments((page - 1) * pageLimit, pageLimit)}
                                         disabled={loading}
                                         className={`px-2 py-1 text-xs font-semibold rounded border ${page === currentPage
-                                                ? 'border-cyan-300/70 bg-cyan-300/20 text-cyan-100'
-                                                : 'border-white/20 text-slate-200 hover:bg-white/10'
+                                            ? 'border-cyan-300/70 bg-cyan-300/20 text-cyan-100'
+                                            : 'border-white/20 text-slate-200 hover:bg-white/10'
                                             } disabled:opacity-60`}
                                     >
                                         {page}
@@ -832,6 +1030,26 @@ const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUr
                             />
                         </div>
                         <p className="mt-2 text-right text-xs text-slate-400">{autoReviewProgress}%</p>
+                    </div>
+                </div>
+            )}
+
+            {rerunSrtRunning && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                    <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-slate-950 p-5 shadow-2xl">
+                        <h3 className="text-base font-semibold text-white">Accepted-only SRT rerun in progress</h3>
+                        <p className="mt-2 text-sm text-slate-300">{rerunSrtProgressText || 'Processing segments...'}</p>
+                        <div className="mt-4 h-2 w-full overflow-hidden rounded bg-white/10">
+                            <div
+                                className="h-full rounded bg-cyan-400 transition-all duration-300"
+                                style={{ width: `${Math.max(0, Math.min(100, rerunSrtProgress))}%` }}
+                            />
+                        </div>
+                        <p className="mt-2 text-right text-xs text-slate-400">{rerunSrtProgress}%</p>
+                        <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                            <p className="text-xs uppercase tracking-wide text-slate-500">Current translation</p>
+                            <p className="mt-2 text-sm text-slate-100 whitespace-pre-wrap">{rerunSrtCurrentTranscript || 'Waiting for transcript...'}</p>
+                        </div>
                     </div>
                 </div>
             )}

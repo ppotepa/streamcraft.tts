@@ -46,6 +46,32 @@ def _count_clips(clips_dir: Path) -> int:
     return wav + m4a
 
 
+def _count_manifest_rows(manifest_path: Path) -> int:
+    if not manifest_path.exists() or not manifest_path.is_file():
+        return 0
+    try:
+        with manifest_path.open("r", encoding="utf-8") as handle:
+            return sum(1 for line in handle if line.strip())
+    except Exception:
+        return 0
+
+
+def _count_segments_json(segments_path: Path) -> int:
+    if not segments_path.exists() or not segments_path.is_file():
+        return 0
+    try:
+        payload = json.loads(segments_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+
+    segments = payload.get("segments") if isinstance(payload, dict) else None
+    if not isinstance(segments, list):
+        return 0
+
+    kept_count = sum(1 for segment in segments if isinstance(segment, dict) and segment.get("kept"))
+    return kept_count if kept_count > 0 else len(segments)
+
+
 def _to_rel(path_value: Path, workspace_root: Path) -> str:
     resolved = path_value.resolve(strict=False)
     try:
@@ -74,6 +100,12 @@ def _build_run_record(streamer_slug: str, run_dir: Path, out_root: Path, workspa
     tts_dir = out_root / streamer_slug / "tts"
     tts_files = sorted(tts_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True) if tts_dir.exists() else []
 
+    clips_count = _count_clips(clips_dir)
+    if clips_count == 0:
+        clips_count = _count_manifest_rows(manifest_jsonl)
+    if clips_count == 0 and segments_manifest and segments_manifest.exists():
+        clips_count = _count_segments_json(segments_manifest)
+
     return {
         "datasetId": f"{streamer_slug}:{run_id}",
         "streamer": streamer_slug,
@@ -84,7 +116,7 @@ def _build_run_record(streamer_slug: str, run_dir: Path, out_root: Path, workspa
         "vodId": vod_identifier,
         "datasetPath": _to_rel(run_dir, workspace_root),
         "clipsPath": _to_rel(clips_dir, workspace_root) if clips_dir.exists() else None,
-        "clipsCount": _count_clips(clips_dir),
+        "clipsCount": clips_count,
         "manifestPath": _to_rel(manifest_jsonl, workspace_root) if manifest_jsonl.exists() else None,
         "segmentsPath": _to_rel(segments_manifest, workspace_root) if segments_manifest and segments_manifest.exists() else None,
         "latestTtsPath": _to_rel(tts_files[0], workspace_root) if tts_files else None,
@@ -108,6 +140,13 @@ def _build_legacy_record(streamer_slug: str, streamer_dir: Path, out_root: Path,
     tts_dir = out_root / streamer_slug / "tts"
     tts_files = sorted(tts_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True) if tts_dir.exists() else []
 
+    clips_count = _count_clips(clips_dir)
+    if clips_count == 0:
+        manifest_jsonl = streamer_dir / "manifest.jsonl"
+        clips_count = _count_manifest_rows(manifest_jsonl)
+    if clips_count == 0 and segments_manifest is not None and segments_manifest.exists():
+        clips_count = _count_segments_json(segments_manifest)
+
     return {
         "datasetId": f"{streamer_slug}:legacy",
         "streamer": streamer_slug,
@@ -118,7 +157,7 @@ def _build_legacy_record(streamer_slug: str, streamer_dir: Path, out_root: Path,
         "vodId": None,
         "datasetPath": _to_rel(streamer_dir, workspace_root),
         "clipsPath": _to_rel(clips_dir, workspace_root) if clips_dir.exists() else None,
-        "clipsCount": _count_clips(clips_dir),
+        "clipsCount": clips_count,
         "manifestPath": _to_rel(manifest_csv, workspace_root) if manifest_csv.exists() else None,
         "segmentsPath": _to_rel(segments_manifest, workspace_root) if segments_manifest else None,
         "latestTtsPath": _to_rel(tts_files[0], workspace_root) if tts_files else None,

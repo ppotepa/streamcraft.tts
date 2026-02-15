@@ -74,9 +74,9 @@ async def transcribe_audio(
 @router.post("/transcribe-segment")
 async def transcribe_segment(request: TranscribeSegmentRequest):
     """Transcribe a single segment with word-level timestamps, streaming NDJSON."""
-    from streamcraft.api import routes as legacy_routes
+    from streamcraft.api.routes import impl as route_impl
 
-    return await legacy_routes.transcribe_segment(request)
+    return await route_impl.transcribe_segment(request)
 
 
 @router.get("/{transcription_id}")
