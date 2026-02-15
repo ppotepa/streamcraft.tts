@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from streamcraft.models.api import JobResponse, JobSteps, JobOutputs
+from streamcraft.core.pipeline import generate_run_id
 
 JOBS_FILE = Path("temp") / "jobs.json"
 
@@ -22,9 +23,22 @@ def _read_jobs() -> List[Dict]:
     _ensure_jobs_file()
     try:
         with open(JOBS_FILE, 'r') as f:
-            return json.load(f)
+            jobs = json.load(f)
     except (json.JSONDecodeError, FileNotFoundError):
         return []
+
+    changed = False
+    for job in jobs:
+        outputs = job.get("outputs") or {}
+        if not outputs.get("runId"):
+            outputs["runId"] = generate_run_id()
+            job["outputs"] = outputs
+            changed = True
+
+    if changed:
+        _write_jobs(jobs)
+
+    return jobs
 
 
 def _write_jobs(jobs: List[Dict]) -> None:
@@ -88,6 +102,7 @@ def create_job(vod_url: str, streamer: str, title: str) -> JobResponse:
     jobs = _read_jobs()
     job_id = f"job-{len(jobs) + 1}-{int(datetime.now().timestamp())}"
     now = datetime.now().isoformat()
+    run_id = generate_run_id()
     
     job_data = {
         "id": job_id,
@@ -97,7 +112,7 @@ def create_job(vod_url: str, streamer: str, title: str) -> JobResponse:
         "createdAt": now,
         "updatedAt": now,
         "steps": {"vod": True, "audio": False, "sanitize": False, "srt": False, "train": False, "tts": False},
-        "outputs": {},
+        "outputs": {"runId": run_id},
     }
     
     jobs.append(job_data)
@@ -130,7 +145,9 @@ def update_job(
             if steps:
                 j["steps"] = steps.model_dump()
             if outputs:
-                j["outputs"] = outputs.model_dump()
+                next_outputs = dict(j.get("outputs") or {})
+                next_outputs.update(outputs.model_dump(exclude_none=True))
+                j["outputs"] = next_outputs
             
             jobs[i] = j
             _write_jobs(jobs)

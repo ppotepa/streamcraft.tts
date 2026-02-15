@@ -4,6 +4,7 @@ FastAPI routes for Dataset domain
 
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from streamcraft.application.dataset.create_dataset import CreateDatasetHandler
@@ -76,7 +77,7 @@ async def create_dataset(
     ]
 
     command = CreateDatasetCommand(name=request.name, entries=entries)
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=400, detail=str(result.unwrap_error()))
@@ -93,7 +94,7 @@ async def validate_dataset(
     from streamcraft.application.dataset.validate_dataset import ValidateDatasetCommand
 
     command = ValidateDatasetCommand(dataset_id=dataset_id)
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=404, detail=str(result.unwrap_error()))
@@ -115,7 +116,7 @@ async def export_dataset(
         output_path=request.output_path,
         format=request.format,
     )
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=404, detail=str(result.unwrap_error()))
@@ -140,7 +141,7 @@ async def split_dataset(
         shuffle=request.shuffle,
         random_seed=request.random_seed,
     )
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=404, detail=str(result.unwrap_error()))

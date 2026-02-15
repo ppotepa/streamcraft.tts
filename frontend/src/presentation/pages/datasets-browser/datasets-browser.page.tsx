@@ -141,6 +141,7 @@ export const DatasetsBrowserPage: React.FC = () => {
                                 <th className="text-left py-2 pr-4">Clips</th>
                                 <th className="text-left py-2 pr-4">Created</th>
                                 <th className="text-left py-2 pr-4">Artifacts</th>
+                                <th className="text-left py-2 pr-4">Review</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -175,11 +176,23 @@ export const DatasetsBrowserPage: React.FC = () => {
                                             )}
                                         </div>
                                     </td>
+                                    <td className="py-2 pr-4">
+                                        {item.vodUrl && item.runId ? (
+                                            <a
+                                                className="text-amber-300 hover:text-amber-200"
+                                                href={`/review?vodUrl=${encodeURIComponent(item.vodUrl)}&runId=${encodeURIComponent(item.runId)}`}
+                                            >
+                                                open review manager
+                                            </a>
+                                        ) : (
+                                            <span className="text-slate-500">run-scoped only</span>
+                                        )}
+                                    </td>
                                 </tr>
                             ))}
                             {datasets.length === 0 && !loading && (
                                 <tr>
-                                    <td colSpan={6} className="py-6 text-slate-500 text-center">
+                                    <td colSpan={7} className="py-6 text-slate-500 text-center">
                                         Brak datasetów do wyświetlenia.
                                     </td>
                                 </tr>

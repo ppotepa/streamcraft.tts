@@ -5,12 +5,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-from streamcraft.core.pipeline import describe_vod, resolve_output_dirs
+from streamcraft.core.pipeline import describe_vod, slugify_label
 from streamcraft.core.run_manager import (
     RunMetadata,
     delete_run,
-    get_legacy_run_metadata,
     list_runs,
     load_run_metadata,
 )
@@ -89,18 +89,12 @@ async def list_vod_runs(
     try:
         # Determine streamer from VOD URL
         streamer, _ = describe_vod(vod_url)
-        if not streamer or streamer == "unknown":
+        streamer_slug = slugify_label(streamer, "unknown")
+        if not streamer_slug or streamer_slug == "unknown":
             raise HTTPException(status_code=400, detail="Cannot determine streamer from VOD URL")
         
         dataset_root = Path(dataset_out)
-        runs = list_runs(dataset_root, streamer)
-        
-        # Also check for legacy flat-structure run
-        legacy_dataset_dir = dataset_root / streamer
-        if legacy_dataset_dir.exists():
-            legacy_run = get_legacy_run_metadata(legacy_dataset_dir, vod_url, streamer)
-            if legacy_run:
-                runs.append(legacy_run)
+        runs = await run_in_threadpool(list_runs, dataset_root, streamer_slug)
         
         return RunListResponse(
             runs=[_to_response(r) for r in runs],
@@ -120,25 +114,18 @@ async def get_vod_run(
     """Get metadata for a specific run."""
     try:
         streamer, _ = describe_vod(vod_url)
-        if not streamer or streamer == "unknown":
+        streamer_slug = slugify_label(streamer, "unknown")
+        if not streamer_slug or streamer_slug == "unknown":
             raise HTTPException(status_code=400, detail="Cannot determine streamer from VOD URL")
         
         dataset_root = Path(dataset_out)
-        
-        # Handle legacy "default" run
-        if run_id == "default":
-            legacy_dataset_dir = dataset_root / streamer
-            metadata = get_legacy_run_metadata(legacy_dataset_dir, vod_url, streamer)
-            if not metadata:
-                raise HTTPException(status_code=404, detail="Legacy run not found")
-            return _to_response(metadata)
-        
+
         # Handle versioned runs
-        run_dir = dataset_root / streamer / "runs" / run_id
+        run_dir = dataset_root / streamer_slug / "runs" / run_id
         if not run_dir.exists():
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
         
-        metadata = load_run_metadata(run_dir)
+        metadata = await run_in_threadpool(load_run_metadata, run_dir)
         if not metadata:
             raise HTTPException(status_code=404, detail=f"Run metadata not found for {run_id}")
         
@@ -158,15 +145,13 @@ async def delete_vod_run(
 ) -> dict:
     """Delete a specific run."""
     try:
-        if run_id == "default":
-            raise HTTPException(status_code=400, detail="Cannot delete legacy default run")
-        
         streamer, _ = describe_vod(vod_url)
-        if not streamer or streamer == "unknown":
+        streamer_slug = slugify_label(streamer, "unknown")
+        if not streamer_slug or streamer_slug == "unknown":
             raise HTTPException(status_code=400, detail="Cannot determine streamer from VOD URL")
         
         dataset_root = Path(dataset_out)
-        success = delete_run(dataset_root, streamer, run_id)
+        success = await run_in_threadpool(delete_run, dataset_root, streamer_slug, run_id)
         
         if not success:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found")

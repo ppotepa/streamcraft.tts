@@ -12,6 +12,7 @@ from streamcraft.core.pipeline import (
 )
 from streamcraft.core.dataset import run_dataset
 from streamcraft.settings import get_settings
+from streamcraft.cli.migrate_legacy_runs import migrate_legacy_dataset_root
 
 app = typer.Typer(help="Streamcraft TTS CLI")
 
@@ -85,6 +86,17 @@ def pipeline(
         clip_aac_bitrate=clip_aac_bitrate,
     )
     typer.echo("[OK] Pipeline complete!")
+
+
+@app.command("migrate-legacy")
+def migrate_legacy(
+    dataset_out: str = typer.Option("dataset", "--dataset-out", help="Dataset root to migrate"),
+):
+    """Migrate legacy flat datasets into run-scoped structure."""
+    root = Path(dataset_out)
+    typer.echo(f"[i] Migrating legacy datasets under: {root}")
+    migrate_legacy_dataset_root(root)
+    typer.echo("[OK] Migration completed")
 
 
 if __name__ == "__main__":

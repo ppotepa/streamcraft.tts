@@ -4,6 +4,7 @@ FastAPI routes for Transcription domain
 
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from streamcraft.application.transcription.filter_transcript_cues import FilterTranscriptCuesHandler
@@ -62,7 +63,7 @@ async def transcribe_audio(
         model=request.model,
         language=request.language,
     )
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=400, detail=str(result.unwrap_error()))
@@ -87,7 +88,7 @@ async def get_transcript(
     from streamcraft.application.transcription.get_transcript import GetTranscriptCommand
 
     command = GetTranscriptCommand(transcription_id=transcription_id)
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=404, detail=str(result.unwrap_error()))
@@ -108,7 +109,7 @@ async def parse_subtitles(
         format=request.format,
         audio_path=request.audio_path,
     )
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=400, detail=str(result.unwrap_error()))
@@ -132,7 +133,7 @@ async def filter_transcript_cues(
         max_duration_seconds=request.max_duration_seconds,
         remove_empty_text=request.remove_empty_text,
     )
-    result = handler.execute(command)
+    result = await run_in_threadpool(handler.execute, command)
 
     if result.is_failure():
         raise HTTPException(status_code=404, detail=str(result.unwrap_error()))

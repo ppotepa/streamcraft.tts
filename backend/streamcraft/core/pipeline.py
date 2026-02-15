@@ -2,6 +2,7 @@ import argparse
 import datetime
 import hashlib
 import os
+import secrets
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -62,8 +63,8 @@ def fallback_vod_slug(vod: str) -> str:
 
 
 def generate_run_id() -> str:
-    """Generate a unique run identifier based on current timestamp."""
-    return datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    """Generate a collision-resistant run identifier."""
+    return datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f") + f"_{secrets.token_hex(4)}"
 
 
 def resolve_output_dirs(

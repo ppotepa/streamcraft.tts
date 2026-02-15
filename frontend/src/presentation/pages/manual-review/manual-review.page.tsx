@@ -57,6 +57,7 @@ type SegmentManifestResponse = {
 
 type ManualReviewPageProps = {
     vodUrlOverride?: string;
+    runIdOverride?: string;
 };
 
 type HistoryEntry = {
@@ -64,7 +65,7 @@ type HistoryEntry = {
     prevDecision: 'accept' | 'reject' | null;
 };
 
-const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
+const ManualReviewPanel: React.FC<{ vodUrl: string; runId?: string }> = ({ vodUrl, runId }) => {
 
     const [segments, setSegments] = useState<SegmentItem[]>([]);
     const [cleanPath, setCleanPath] = useState<string | null>(null);
@@ -79,7 +80,6 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
     const [totalSegments, setTotalSegments] = useState(0);
     const [pageOffset, setPageOffset] = useState(0);
     const [pageLimit, setPageLimit] = useState(200);
-    const [hasMore, setHasMore] = useState(false);
     const [showTimeline, setShowTimeline] = useState(() => {
         const stored = localStorage.getItem('reviewShowTimeline');
         return stored !== null ? stored === 'true' : true;
@@ -94,6 +94,10 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
     });
     const [suggestionRunning, setSuggestionRunning] = useState(false);
     const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
+    const [autoReviewRunning, setAutoReviewRunning] = useState(false);
+    const [autoReviewMessage, setAutoReviewMessage] = useState<string | null>(null);
+    const [autoReviewProgress, setAutoReviewProgress] = useState(0);
+    const [autoReviewProgressText, setAutoReviewProgressText] = useState('');
 
     const votesRef = useRef<Record<number, 'accept' | 'reject'>>({});
 
@@ -109,11 +113,15 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
             setError('Provide vodUrl in query string.');
             return;
         }
+        if (!runId) {
+            setError('runId is required for manual review. Open review from Wizard job context.');
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
             const response = await fetch(
-                `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${nextOffset}&limit=${nextLimit}`
+                `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${nextOffset}&limit=${nextLimit}${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`
             );
             const data: SegmentManifestResponse = await response.json();
             if (!response.ok) {
@@ -123,7 +131,6 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
             setCleanPath(data.cleanPath || null);
             setOriginalPath((data as { originalPath?: string | null }).originalPath || null);
             setTotalSegments(data.total ?? data.segments?.length ?? 0);
-            setHasMore(Boolean(data.hasMore));
             setPageOffset(data.offset ?? nextOffset);
             setPageLimit(data.limit ?? nextLimit);
         } catch (err) {
@@ -135,9 +142,10 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
 
     const fetchReview = async (): Promise<void> => {
         if (!vodUrl) return;
+        if (!runId) return;
         try {
             const response = await fetch(
-                `${baseUrl}/legacy/sanitize/review?vodUrl=${encodeURIComponent(vodUrl)}`
+                `${baseUrl}/legacy/sanitize/review?vodUrl=${encodeURIComponent(vodUrl)}${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`
             );
             const data: ReviewState = await response.json();
             if (!response.ok) {
@@ -160,6 +168,10 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
     };
 
     const handleLoad = async (): Promise<void> => {
+        if (!runId) {
+            setError('runId is required for manual review.');
+            return;
+        }
         await Promise.all([fetchSegments(0, pageLimit), fetchReview()]);
     };
 
@@ -169,7 +181,7 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
         setSegments([]);
         handleLoad();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [vodUrl]);
+    }, [vodUrl, runId]);
 
     useEffect(() => {
         votesRef.current = votes;
@@ -184,6 +196,27 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
         const percent = total > 0 ? Math.round(((accepted + rejected) / total) * 100) : 0;
         return { total, accepted, rejected, remaining, percent };
     }, [segments, totalSegments, votes]);
+
+    const totalPages = useMemo(() => {
+        const total = Math.max(0, totalSegments || segments.length);
+        return Math.max(1, Math.ceil(total / Math.max(1, pageLimit)));
+    }, [pageLimit, segments.length, totalSegments]);
+
+    const currentPage = useMemo(
+        () => Math.min(totalPages, Math.max(1, Math.floor(pageOffset / Math.max(1, pageLimit)) + 1)),
+        [pageLimit, pageOffset, totalPages]
+    );
+
+    const paginationPages = useMemo(() => {
+        const radius = 2;
+        const start = Math.max(1, currentPage - radius);
+        const end = Math.min(totalPages, currentPage + radius);
+        const pages: number[] = [];
+        for (let page = start; page <= end; page += 1) {
+            pages.push(page);
+        }
+        return pages;
+    }, [currentPage, totalPages]);
 
     const keptCount = useMemo(
         () => segments.filter((segment) => segment.kept).length,
@@ -229,6 +262,7 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
                     strictness: sanitizeSuggestion.settings.strictness,
                     extractVocals: sanitizeSuggestion.settings.extractVocals,
                     stream: false,
+                    runId: runId || undefined,
                 }),
             });
             const data = await response.json();
@@ -242,7 +276,7 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
         } finally {
             setSuggestionRunning(false);
         }
-    }, [baseUrl, handleLoad, sanitizeSuggestion, vodUrl]);
+    }, [baseUrl, handleLoad, runId, sanitizeSuggestion, vodUrl]);
 
     const acceptedList = useMemo(
         () => segments.filter((segment) => votes[segment.index] === 'accept'),
@@ -351,6 +385,7 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
 
             const body = {
                 vodUrl,
+                runId: runId || undefined,
                 totalSegments: segments.length,
                 reviewIndex: voteList.length,
                 votes: voteList,
@@ -373,6 +408,113 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
         }
     };
 
+    const handleAutomaticReview = useCallback(async (): Promise<void> => {
+        if (!vodUrl || !segments.length) return;
+
+        setAutoReviewRunning(true);
+        setAutoReviewMessage(null);
+        setAutoReviewProgress(0);
+        setAutoReviewProgressText('Loading all segments...');
+        setError(null);
+
+        try {
+            const allSegments: SegmentItem[] = [];
+            const chunkSize = 500;
+            let offset = 0;
+            let expectedTotal = totalSegments || segments.length;
+
+            while (true) {
+                const response = await fetch(
+                    `${baseUrl}/legacy/sanitize/segments?vodUrl=${encodeURIComponent(vodUrl)}&offset=${offset}&limit=${chunkSize}${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`
+                );
+                const payload: SegmentManifestResponse = await response.json();
+                if (!response.ok) {
+                    throw new Error((payload as { detail?: string }).detail || 'Failed to load segments for automatic review');
+                }
+
+                const batch = payload.segments || [];
+                expectedTotal = payload.total ?? expectedTotal;
+                allSegments.push(...batch);
+
+                const loaded = allSegments.length;
+                const ratio = expectedTotal > 0 ? Math.min(100, Math.round((loaded / expectedTotal) * 100)) : 0;
+                setAutoReviewProgress(Math.max(5, ratio));
+                setAutoReviewProgressText(`Analyzing segments ${loaded}/${expectedTotal}...`);
+
+                if (!payload.hasMore || batch.length === 0) {
+                    break;
+                }
+                offset += chunkSize;
+            }
+
+            const nextVotes: Record<number, 'accept' | 'reject'> = {};
+            const confidenceThreshold = 85;
+            const speechThreshold = 85;
+
+            for (const segment of allSegments) {
+                const confidence = Number(segment.quality ?? 0);
+                const rawSpeech = Number(segment.speechRatio ?? 0);
+                const speechPercent = rawSpeech <= 1 ? rawSpeech * 100 : rawSpeech;
+                nextVotes[segment.index] =
+                    confidence >= confidenceThreshold && speechPercent >= speechThreshold
+                        ? 'accept'
+                        : 'reject';
+            }
+
+            setAutoReviewProgress(92);
+            setAutoReviewProgressText('Saving automatic review...');
+
+            setVotes(nextVotes);
+            setSegments((prev) =>
+                prev.map((segment) => ({
+                    ...segment,
+                    kept: nextVotes[segment.index] === 'accept',
+                }))
+            );
+
+            const voteList: ReviewVote[] = allSegments.map((segment) => ({
+                index: segment.index,
+                decision: nextVotes[segment.index],
+                segment: {
+                    ...segment,
+                    kept: nextVotes[segment.index] === 'accept',
+                },
+                note: notes[segment.index] || null,
+            }));
+
+            const body = {
+                vodUrl,
+                runId: runId || undefined,
+                totalSegments: allSegments.length,
+                reviewIndex: voteList.length,
+                votes: voteList,
+            };
+
+            const response = await fetch(`${baseUrl}/legacy/sanitize/review`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data?.detail || 'Automatic review save failed');
+            }
+
+            setReviewMeta(data);
+            const accepted = Object.values(nextVotes).filter((vote) => vote === 'accept').length;
+            const rejected = Object.values(nextVotes).filter((vote) => vote === 'reject').length;
+            setAutoReviewMessage(`Automatic review saved: accepted ${accepted}, rejected ${rejected}`);
+            setAutoReviewProgress(100);
+            setAutoReviewProgressText('Automatic review completed');
+        } catch (err) {
+            setError((err as Error).message);
+            setAutoReviewMessage((err as Error).message);
+            setAutoReviewProgressText('Automatic review failed');
+        } finally {
+            setAutoReviewRunning(false);
+        }
+    }, [baseUrl, notes, runId, segments.length, totalSegments, vodUrl]);
+
     const handleExport = async (): Promise<void> => {
         if (!vodUrl) return;
         setSaving(true);
@@ -381,7 +523,7 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
             const response = await fetch(`${baseUrl}/legacy/sanitize/export-clips`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vodUrl }),
+                body: JSON.stringify({ vodUrl, runId: runId || undefined }),
             });
             const data = await response.json();
             if (!response.ok) {
@@ -457,27 +599,20 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
                         </button>
                         <button
                             type="button"
-                            onClick={() => fetchSegments(Math.max(0, pageOffset - pageLimit), pageLimit)}
-                            disabled={pageOffset === 0 || loading}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Previous
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => fetchSegments(pageOffset + pageLimit, pageLimit)}
-                            disabled={!hasMore || loading}
-                            className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
-                        >
-                            Load more
-                        </button>
-                        <button
-                            type="button"
                             onClick={handleSave}
                             disabled={saving || segments.length === 0}
                             className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60"
                         >
                             {saving ? 'Saving...' : 'Save Review'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleAutomaticReview}
+                            disabled={autoReviewRunning || saving || segments.length === 0}
+                            className="secondary-btn px-4 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            title="Apply intelligent accept/reject decisions and save review automatically"
+                        >
+                            {autoReviewRunning ? 'Auto reviewing...' : 'Automatic Review'}
                         </button>
                         <button
                             type="button"
@@ -503,6 +638,9 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
                             Undo
                         </button>
                     </div>
+                    {autoReviewMessage && (
+                        <div className="text-xs text-slate-400 mt-2">{autoReviewMessage}</div>
+                    )}
                 </div>
 
                 <div className="glass rounded-2xl p-3 review-toolbar">
@@ -573,22 +711,137 @@ const ManualReviewPanel: React.FC<{ vodUrl: string }> = ({ vodUrl }) => {
                         No segments loaded yet. Run Sanitize in the wizard, then click Load Latest.
                     </div>
                 ) : (
-                    <div className="review-layout">
-                        {/* New Review System */}
-                        <ReviewManager
-                            segments={segments.map(mapToReviewSegment)}
-                            onSegmentUpdate={handleSegmentUpdate}
-                            onSegmentAction={handleSegmentAction}
-                        />
+                    <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => fetchSegments(0, pageLimit)}
+                                disabled={currentPage <= 1 || loading}
+                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            >
+                                First
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => fetchSegments(Math.max(0, pageOffset - pageLimit), pageLimit)}
+                                disabled={currentPage <= 1 || loading}
+                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            >
+                                Previous
+                            </button>
+                            <div className="flex items-center gap-1">
+                                {paginationPages[0] > 1 && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => fetchSegments(0, pageLimit)}
+                                            disabled={loading}
+                                            className="secondary-btn px-2 py-1 text-xs font-semibold rounded disabled:opacity-60"
+                                        >
+                                            1
+                                        </button>
+                                        {paginationPages[0] > 2 && <span className="text-xs text-slate-500">…</span>}
+                                    </>
+                                )}
+                                {paginationPages.map((page) => (
+                                    <button
+                                        key={page}
+                                        type="button"
+                                        onClick={() => fetchSegments((page - 1) * pageLimit, pageLimit)}
+                                        disabled={loading}
+                                        className={`px-2 py-1 text-xs font-semibold rounded border ${page === currentPage
+                                                ? 'border-cyan-300/70 bg-cyan-300/20 text-cyan-100'
+                                                : 'border-white/20 text-slate-200 hover:bg-white/10'
+                                            } disabled:opacity-60`}
+                                    >
+                                        {page}
+                                    </button>
+                                ))}
+                                {paginationPages[paginationPages.length - 1] < totalPages && (
+                                    <>
+                                        {paginationPages[paginationPages.length - 1] < totalPages - 1 && (
+                                            <span className="text-xs text-slate-500">…</span>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => fetchSegments((totalPages - 1) * pageLimit, pageLimit)}
+                                            disabled={loading}
+                                            className="secondary-btn px-2 py-1 text-xs font-semibold rounded disabled:opacity-60"
+                                        >
+                                            {totalPages}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => fetchSegments(pageOffset + pageLimit, pageLimit)}
+                                disabled={currentPage >= totalPages || loading}
+                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            >
+                                Next
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => fetchSegments((totalPages - 1) * pageLimit, pageLimit)}
+                                disabled={currentPage >= totalPages || loading}
+                                className="secondary-btn px-3 py-2 text-xs font-semibold rounded-lg disabled:opacity-60"
+                            >
+                                Last
+                            </button>
+                            <label className="text-xs text-slate-400 flex items-center gap-2">
+                                Per page
+                                <select
+                                    value={pageLimit}
+                                    onChange={(event) => {
+                                        const nextLimit = Number(event.target.value) || 200;
+                                        setPageLimit(nextLimit);
+                                        void fetchSegments(0, nextLimit);
+                                    }}
+                                    className="rounded border border-white/20 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
+                                >
+                                    <option value={100}>100</option>
+                                    <option value={200}>200</option>
+                                    <option value={500}>500</option>
+                                </select>
+                            </label>
+                            <span className="text-xs text-slate-500">Page {currentPage}/{totalPages}</span>
+                        </div>
+
+                        <div className="review-layout">
+                            {/* New Review System */}
+                            <ReviewManager
+                                segments={segments.map(mapToReviewSegment)}
+                                onSegmentUpdate={handleSegmentUpdate}
+                                onSegmentAction={handleSegmentAction}
+                            />
+                        </div>
                     </div>
                 )}
             </div>
+
+            {autoReviewRunning && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                    <div className="w-full max-w-md rounded-2xl border border-white/15 bg-slate-950 p-5 shadow-2xl">
+                        <h3 className="text-base font-semibold text-white">Automatic Review in progress</h3>
+                        <p className="mt-2 text-sm text-slate-300">{autoReviewProgressText || 'Processing...'}</p>
+                        <div className="mt-4 h-2 w-full overflow-hidden rounded bg-white/10">
+                            <div
+                                className="h-full rounded bg-cyan-400 transition-all duration-300"
+                                style={{ width: `${Math.max(0, Math.min(100, autoReviewProgress))}%` }}
+                            />
+                        </div>
+                        <p className="mt-2 text-right text-xs text-slate-400">{autoReviewProgress}%</p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
-export const ManualReviewPage: React.FC<ManualReviewPageProps> = ({ vodUrlOverride }) => {
+export const ManualReviewPage: React.FC<ManualReviewPageProps> = ({ vodUrlOverride, runIdOverride }) => {
     const [searchParams] = useSearchParams();
     const vodUrl = vodUrlOverride || searchParams.get('vodUrl') || '';
-    return <ManualReviewPanel vodUrl={vodUrl} />;
+    const runId = runIdOverride || searchParams.get('runId') || undefined;
+    return <ManualReviewPanel vodUrl={vodUrl} runId={runId} />;
 };

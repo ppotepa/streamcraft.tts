@@ -37,12 +37,32 @@ type TtsResult = {
 
 type TtsPayload = {
     vodUrl: string;
+    runId: string;
     streamer: string;
     text: string;
     sourceMode: 'all_streamer' | 'target_dataset';
     targetDatasetPath?: string;
     qualityPreset: 'fast' | 'balanced' | 'best';
     acceptedOnly: boolean;
+    advancedMode?: boolean;
+    targetSeconds?: number;
+    maxPerRun?: number;
+    minSpeakerSim?: number;
+    minClipSec?: number;
+    maxClipSec?: number;
+    maxClips?: number;
+    speakerClipCount?: number;
+    model?: string;
+    language?: string;
+    device?: 'auto' | 'cpu' | 'cuda';
+    cpuThreads?: number;
+    cudaBenchmark?: boolean;
+    temperature?: number;
+    topP?: number;
+    topK?: number;
+    speed?: number;
+    repetitionPenalty?: number;
+    lengthPenalty?: number;
 };
 
 type TtsStreamEvent = {
@@ -90,6 +110,16 @@ const isNetworkLikeError = (error: unknown): boolean => {
         message.includes('failed to fetch') ||
         message.includes('load failed')
     );
+};
+
+const parseOptionalNumber = (value: string, min?: number, max?: number): number | undefined => {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return undefined;
+    if (min !== undefined && parsed < min) return min;
+    if (max !== undefined && parsed > max) return max;
+    return parsed;
 };
 
 const formatDate = (value?: string | null): string => {
@@ -141,6 +171,25 @@ export const TtsPage: React.FC = () => {
     const [ttsSourceMode, setTtsSourceMode] = useState<'all_streamer' | 'target_dataset'>('all_streamer');
     const [ttsQualityPreset, setTtsQualityPreset] = useState<'fast' | 'balanced' | 'best'>('balanced');
     const [ttsAcceptedOnly, setTtsAcceptedOnly] = useState(false);
+    const [advancedMode, setAdvancedMode] = useState(false);
+    const [advancedTargetSeconds, setAdvancedTargetSeconds] = useState('120');
+    const [advancedMaxPerRun, setAdvancedMaxPerRun] = useState('8');
+    const [advancedMinSpeakerSim, setAdvancedMinSpeakerSim] = useState('0.15');
+    const [advancedMinClipSec, setAdvancedMinClipSec] = useState('2');
+    const [advancedMaxClipSec, setAdvancedMaxClipSec] = useState('10');
+    const [advancedMaxClips, setAdvancedMaxClips] = useState('64');
+    const [advancedSpeakerClipCount, setAdvancedSpeakerClipCount] = useState('24');
+    const [advancedModel, setAdvancedModel] = useState('xtts_v2');
+    const [advancedLanguage, setAdvancedLanguage] = useState('en');
+    const [advancedDevice, setAdvancedDevice] = useState<'auto' | 'cpu' | 'cuda'>('auto');
+    const [advancedCpuThreads, setAdvancedCpuThreads] = useState('16');
+    const [advancedCudaBenchmark, setAdvancedCudaBenchmark] = useState(true);
+    const [advancedTemperature, setAdvancedTemperature] = useState('0.65');
+    const [advancedTopP, setAdvancedTopP] = useState('0.9');
+    const [advancedTopK, setAdvancedTopK] = useState('50');
+    const [advancedSpeed, setAdvancedSpeed] = useState('1.0');
+    const [advancedRepetitionPenalty, setAdvancedRepetitionPenalty] = useState('2.0');
+    const [advancedLengthPenalty, setAdvancedLengthPenalty] = useState('1.0');
     const [ttsText, setTtsText] = useState<string>(
         'Hey chat, witajcie! Dzisiaj robimy nowy challenge i lecimy ostro z contentem.'
     );
@@ -341,6 +390,13 @@ export const TtsPage: React.FC = () => {
         return selectedStreamerDatasets.find((item) => Boolean(item.vodUrl))?.vodUrl ?? '';
     }, [ttsSourceMode, selectedTargetDataset, selectedStreamerDatasets]);
 
+    const effectiveRunId = useMemo(() => {
+        if (ttsSourceMode === 'target_dataset') {
+            return selectedTargetDataset?.runId ?? '';
+        }
+        return selectedStreamerDatasets.find((item) => Boolean(item.runId))?.runId ?? '';
+    }, [ttsSourceMode, selectedTargetDataset, selectedStreamerDatasets]);
+
     const sourceBreakdown = useMemo(() => {
         const counts: Record<SourceKey, number> = { twitch: 0, youtube: 0, other: 0 };
         for (const item of selectedStreamerDatasets) {
@@ -395,8 +451,95 @@ export const TtsPage: React.FC = () => {
         !isGenerating &&
         Boolean(selectedStreamer) &&
         Boolean(effectiveVodUrl) &&
+        Boolean(effectiveRunId) &&
         (ttsSourceMode !== 'target_dataset' || Boolean(selectedTargetDataset?.datasetPath)) &&
         ttsText.trim().length > 0;
+
+    const resetAdvancedDefaults = useCallback(() => {
+        setAdvancedTargetSeconds('120');
+        setAdvancedMaxPerRun('8');
+        setAdvancedMinSpeakerSim('0.15');
+        setAdvancedMinClipSec('2');
+        setAdvancedMaxClipSec('10');
+        setAdvancedMaxClips('64');
+        setAdvancedSpeakerClipCount('24');
+        setAdvancedModel('xtts_v2');
+        setAdvancedLanguage('en');
+        setAdvancedDevice('cuda');
+        setAdvancedCpuThreads('16');
+        setAdvancedCudaBenchmark(true);
+        setAdvancedTemperature('0.65');
+        setAdvancedTopP('0.9');
+        setAdvancedTopK('50');
+        setAdvancedSpeed('1.0');
+        setAdvancedRepetitionPenalty('2.0');
+        setAdvancedLengthPenalty('1.0');
+    }, []);
+
+    const applyAdvancedPreset = useCallback((preset: 'SAFE' | 'QUALITY' | 'SPEED') => {
+        if (preset === 'SAFE') {
+            setAdvancedTargetSeconds('100');
+            setAdvancedMaxPerRun('6');
+            setAdvancedMinSpeakerSim('0.2');
+            setAdvancedMinClipSec('2');
+            setAdvancedMaxClipSec('8');
+            setAdvancedMaxClips('48');
+            setAdvancedSpeakerClipCount('16');
+            setAdvancedModel('xtts_v2');
+            setAdvancedLanguage('en');
+            setAdvancedDevice('cuda');
+            setAdvancedCpuThreads('16');
+            setAdvancedCudaBenchmark(true);
+            setAdvancedTemperature('0.55');
+            setAdvancedTopP('0.8');
+            setAdvancedTopK('40');
+            setAdvancedSpeed('1.0');
+            setAdvancedRepetitionPenalty('2.2');
+            setAdvancedLengthPenalty('1.0');
+            return;
+        }
+
+        if (preset === 'QUALITY') {
+            setAdvancedTargetSeconds('180');
+            setAdvancedMaxPerRun('12');
+            setAdvancedMinSpeakerSim('0.15');
+            setAdvancedMinClipSec('1.5');
+            setAdvancedMaxClipSec('12');
+            setAdvancedMaxClips('128');
+            setAdvancedSpeakerClipCount('32');
+            setAdvancedModel('xtts_v2');
+            setAdvancedLanguage('en');
+            setAdvancedDevice('cuda');
+            setAdvancedCpuThreads('16');
+            setAdvancedCudaBenchmark(true);
+            setAdvancedTemperature('0.65');
+            setAdvancedTopP('0.9');
+            setAdvancedTopK('60');
+            setAdvancedSpeed('0.98');
+            setAdvancedRepetitionPenalty('2.0');
+            setAdvancedLengthPenalty('1.0');
+            return;
+        }
+
+        setAdvancedTargetSeconds('70');
+        setAdvancedMaxPerRun('4');
+        setAdvancedMinSpeakerSim('0.1');
+        setAdvancedMinClipSec('2.5');
+        setAdvancedMaxClipSec('7');
+        setAdvancedMaxClips('32');
+        setAdvancedSpeakerClipCount('12');
+        setAdvancedModel('xtts_v2');
+        setAdvancedLanguage('en');
+        setAdvancedDevice('cuda');
+        setAdvancedCpuThreads('16');
+        setAdvancedCudaBenchmark(true);
+        setAdvancedTemperature('0.7');
+        setAdvancedTopP('0.9');
+        setAdvancedTopK('30');
+        setAdvancedSpeed('1.08');
+        setAdvancedRepetitionPenalty('1.8');
+        setAdvancedLengthPenalty('0.95');
+    }, []);
 
     const etaLabel = useMemo(() => {
         if (!isGenerating || generationProgress === null || generationStartedAt === null) {
@@ -420,6 +563,10 @@ export const TtsPage: React.FC = () => {
             setGenerationError('Brak vodUrl do uruchomienia TTS. Wybierz run z poprawnym VOD.');
             return;
         }
+        if (!effectiveRunId) {
+            setGenerationError('Brak runId do uruchomienia TTS. Wybierz dataset przypięty do runu.');
+            return;
+        }
         if (ttsSourceMode === 'target_dataset' && !selectedTargetDataset?.datasetPath) {
             setGenerationError('Tryb target dataset wymaga wyboru konkretnego datasetu z clips.');
             return;
@@ -435,6 +582,7 @@ export const TtsPage: React.FC = () => {
         try {
             const payload = {
                 vodUrl: effectiveVodUrl,
+                runId: effectiveRunId,
                 streamer: selectedStreamer,
                 text: ttsText.trim(),
                 sourceMode: ttsSourceMode,
@@ -444,7 +592,39 @@ export const TtsPage: React.FC = () => {
                         : undefined,
                 qualityPreset: ttsQualityPreset,
                 acceptedOnly: ttsAcceptedOnly,
+                advancedMode,
+                ...(advancedMode
+                    ? {
+                        targetSeconds: parseOptionalNumber(advancedTargetSeconds, 10, 600),
+                        maxPerRun: parseOptionalNumber(advancedMaxPerRun, 1, 64),
+                        minSpeakerSim: parseOptionalNumber(advancedMinSpeakerSim, 0, 1),
+                        minClipSec: parseOptionalNumber(advancedMinClipSec, 0, 30),
+                        maxClipSec: parseOptionalNumber(advancedMaxClipSec, 0, 60),
+                        maxClips: parseOptionalNumber(advancedMaxClips, 1, 2000),
+                        speakerClipCount: parseOptionalNumber(advancedSpeakerClipCount, 1, 128),
+                        model: advancedModel.trim() || undefined,
+                        language: advancedLanguage.trim() || undefined,
+                        device: advancedDevice,
+                        cpuThreads: parseOptionalNumber(advancedCpuThreads, 1, 64),
+                        cudaBenchmark: advancedCudaBenchmark,
+                        temperature: parseOptionalNumber(advancedTemperature, 0, 2),
+                        topP: parseOptionalNumber(advancedTopP, 0, 1),
+                        topK: parseOptionalNumber(advancedTopK, 0, 200),
+                        speed: parseOptionalNumber(advancedSpeed, 0.5, 2),
+                        repetitionPenalty: parseOptionalNumber(advancedRepetitionPenalty, 0.5, 3),
+                        lengthPenalty: parseOptionalNumber(advancedLengthPenalty, 0.2, 3),
+                    }
+                    : {}),
             };
+
+            setGenerationLog((previous) =>
+                appendLog(
+                    previous,
+                    `[client] advancedMode=${advancedMode} speakerClipCount=${advancedMode ? parseOptionalNumber(advancedSpeakerClipCount, 1, 128) ?? 'auto' : 'auto'
+                    } device=${advancedMode ? advancedDevice : 'auto'} targetSeconds=${advancedMode ? parseOptionalNumber(advancedTargetSeconds, 10, 600) ?? 'preset' : 'preset'
+                    }`
+                )
+            );
 
             let finishedOutputPath: string;
             try {
@@ -546,23 +726,6 @@ export const TtsPage: React.FC = () => {
                         </select>
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-xs uppercase tracking-wide text-slate-400">Dataset / Run</label>
-                        <select
-                            value={selectedDatasetId}
-                            onChange={(event) => setSelectedDatasetId(event.target.value)}
-                            className="w-full rounded-lg border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
-                            disabled={!selectedStreamer || datasets.length === 0}
-                        >
-                            <option value="">Wybierz dataset</option>
-                            {datasets.map((item) => (
-                                <option key={item.datasetId} value={item.datasetId}>
-                                    {item.runId || 'legacy'} | clips: {item.clipsCount} | {formatDate(item.createdAt)}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-300 grid gap-2 sm:grid-cols-2">
                         <div>Datasety: <span className="text-white">{streamerResources.totalDatasets}</span></div>
                         <div>Runy: <span className="text-white">{streamerResources.totalRuns}</span></div>
@@ -645,20 +808,59 @@ export const TtsPage: React.FC = () => {
             <div className="glass rounded-2xl p-4 space-y-4">
                 <h2 className="text-lg font-semibold text-white">Generacja TTS</h2>
 
+                <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input
+                            type="checkbox"
+                            checked={ttsSourceMode === 'target_dataset'}
+                            onChange={(event) => setTtsSourceMode(event.target.checked ? 'target_dataset' : 'all_streamer')}
+                        />
+                        Use particular dataset
+                    </label>
+                    {ttsSourceMode === 'target_dataset' ? (
+                        <>
+                            <p className="text-xs text-slate-400">Particular mode uses only the selected dataset/run.</p>
+                            <div>
+                                <label className="text-xs uppercase tracking-wide text-slate-400">Dataset / Run</label>
+                                <select
+                                    value={selectedDatasetId}
+                                    onChange={(event) => setSelectedDatasetId(event.target.value)}
+                                    disabled={!selectedStreamer || selectedStreamerDatasets.length === 0}
+                                    className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 disabled:opacity-60"
+                                >
+                                    <option value="">Wybierz dataset</option>
+                                    {selectedStreamerDatasets.map((dataset) => (
+                                        <option key={dataset.datasetId} value={dataset.datasetId}>
+                                            {dataset.runId ?? 'legacy'} | clips: {dataset.clipsCount} | {formatDate(dataset.createdAt)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </>
+                    ) : (
+                        <p className="text-xs text-slate-400">
+                            Default mode uses all available artifacts for this streamer.
+                        </p>
+                    )}
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2">
-                    <div>
-                        <label className="text-xs uppercase tracking-wide text-slate-400">Quality preset</label>
-                        <select
-                            value={ttsQualityPreset}
-                            onChange={(event) => setTtsQualityPreset(event.target.value as 'fast' | 'balanced' | 'best')}
-                            className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
-                        >
-                            <option value="fast">Fast</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="best">Best</option>
-                        </select>
-                    </div>
-                    <label className="flex items-center gap-2 pt-6 text-sm text-slate-300">
+                    {!advancedMode && (
+                        <div>
+                            <label className="text-xs uppercase tracking-wide text-slate-400">Quality preset</label>
+                            <select
+                                value={ttsQualityPreset}
+                                onChange={(event) => setTtsQualityPreset(event.target.value as 'fast' | 'balanced' | 'best')}
+                                className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-3 py-2 text-sm text-slate-100"
+                            >
+                                <option value="fast">Fast</option>
+                                <option value="balanced">Balanced</option>
+                                <option value="best">Best</option>
+                            </select>
+                            <p className="mt-1 text-xs text-slate-500">Beginner preset mode.</p>
+                        </div>
+                    )}
+                    <label className={`flex items-center gap-2 text-sm text-slate-300 ${advancedMode ? 'pt-1' : 'pt-6'}`}>
                         <input
                             type="checkbox"
                             checked={ttsAcceptedOnly}
@@ -669,22 +871,148 @@ export const TtsPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
-                        <input
-                            type="checkbox"
-                            checked={ttsSourceMode === 'target_dataset'}
-                            onChange={(event) => setTtsSourceMode(event.target.checked ? 'target_dataset' : 'all_streamer')}
-                        />
-                        Use target dataset
-                    </label>
-                    {ttsSourceMode === 'target_dataset' ? (
-                        <p className="text-xs text-slate-400">
-                            Target mode uses only the selected dataset/run.
-                        </p>
+                    <div className="flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                            <input
+                                type="checkbox"
+                                checked={advancedMode}
+                                onChange={(event) => setAdvancedMode(event.target.checked)}
+                            />
+                            Advanced mode
+                        </label>
+                        {advancedMode && (
+                            <button
+                                type="button"
+                                onClick={resetAdvancedDefaults}
+                                className="text-xs px-2 py-1 rounded border border-white/20 text-slate-200 hover:bg-white/10"
+                            >
+                                Reset defaults
+                            </button>
+                        )}
+                    </div>
+                    {advancedMode ? (
+                        <div className="space-y-3">
+                            <p className="text-xs text-slate-400">
+                                Advanced controls override preset behavior. Hover each label for ranges and guidance.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-slate-400">Presets:</span>
+                                <button
+                                    type="button"
+                                    onClick={() => applyAdvancedPreset('SAFE')}
+                                    className="text-xs px-2 py-1 rounded border border-white/20 text-slate-100 hover:bg-white/10"
+                                >
+                                    SAFE
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => applyAdvancedPreset('QUALITY')}
+                                    className="text-xs px-2 py-1 rounded border border-white/20 text-slate-100 hover:bg-white/10"
+                                >
+                                    QUALITY
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => applyAdvancedPreset('SPEED')}
+                                    className="text-xs px-2 py-1 rounded border border-white/20 text-slate-100 hover:bg-white/10"
+                                >
+                                    SPEED
+                                </button>
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-3">
+                                <label className="text-xs text-slate-300" title="Total target duration of selected reference audio, range 10-600s.">
+                                    Target seconds
+                                    <input type="range" min={10} max={300} step={10} value={advancedTargetSeconds} onChange={(event) => setAdvancedTargetSeconds(event.target.value)} className="w-full" />
+                                    <input type="number" min={10} max={600} step={10} value={advancedTargetSeconds} onChange={(event) => setAdvancedTargetSeconds(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Max clips taken per run bucket, range 1-64.">
+                                    Max per run
+                                    <input type="number" min={1} max={64} step={1} value={advancedMaxPerRun} onChange={(event) => setAdvancedMaxPerRun(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Speaker similarity threshold, range 0.0-1.0.">
+                                    Min speaker sim
+                                    <input type="range" min={0} max={1} step={0.05} value={advancedMinSpeakerSim} onChange={(event) => setAdvancedMinSpeakerSim(event.target.value)} className="w-full" />
+                                    <input type="number" min={0} max={1} step={0.05} value={advancedMinSpeakerSim} onChange={(event) => setAdvancedMinSpeakerSim(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+
+                                <label className="text-xs text-slate-300" title="Drop too short clips, range 0-30s.">
+                                    Min clip sec
+                                    <input type="number" min={0} max={30} step={0.5} value={advancedMinClipSec} onChange={(event) => setAdvancedMinClipSec(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Drop too long clips, range 0-60s.">
+                                    Max clip sec
+                                    <input type="number" min={0} max={60} step={0.5} value={advancedMaxClipSec} onChange={(event) => setAdvancedMaxClipSec(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Hard cap on selected references, range 1-2000.">
+                                    Max clips
+                                    <input type="number" min={1} max={2000} step={1} value={advancedMaxClips} onChange={(event) => setAdvancedMaxClips(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+
+                                <label className="text-xs text-slate-300" title="Final number of reference speaker wavs passed to model, range 1-128.">
+                                    Speaker clip count
+                                    <input type="number" min={1} max={128} step={1} value={advancedSpeakerClipCount} onChange={(event) => setAdvancedSpeakerClipCount(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Current script supports XTTS model family.">
+                                    Model
+                                    <select value={advancedModel} onChange={(event) => setAdvancedModel(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100">
+                                        <option value="xtts_v2">xtts_v2</option>
+                                        <option value="xtts">xtts (alias)</option>
+                                    </select>
+                                </label>
+                                <label className="text-xs text-slate-300" title="Language code supported by model, e.g. en, pl, de.">
+                                    Language
+                                    <input value={advancedLanguage} onChange={(event) => setAdvancedLanguage(event.target.value)} placeholder="en" className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+
+                                <label className="text-xs text-slate-300" title="auto prefers CUDA if available. Use cuda to force GPU.">
+                                    Device
+                                    <select value={advancedDevice} onChange={(event) => setAdvancedDevice(event.target.value as 'auto' | 'cpu' | 'cuda')} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100">
+                                        <option value="auto">auto</option>
+                                        <option value="cuda">cuda</option>
+                                        <option value="cpu">cpu</option>
+                                    </select>
+                                </label>
+                                <label className="text-xs text-slate-300" title="Torch CPU threads. 12600K recommended 12-16.">
+                                    CPU threads
+                                    <input type="number" min={1} max={64} step={1} value={advancedCpuThreads} onChange={(event) => setAdvancedCpuThreads(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="flex items-center gap-2 text-xs text-slate-300 pt-5" title="Enable cuDNN benchmark for stable input shapes on GPU.">
+                                    <input type="checkbox" checked={advancedCudaBenchmark} onChange={(event) => setAdvancedCudaBenchmark(event.target.checked)} />
+                                    CUDA benchmark
+                                </label>
+
+                                <label className="text-xs text-slate-300" title="Higher = more diverse, lower = more stable. Range 0-2.">
+                                    Temperature
+                                    <input type="range" min={0} max={2} step={0.05} value={advancedTemperature} onChange={(event) => setAdvancedTemperature(event.target.value)} className="w-full" />
+                                    <input type="number" min={0} max={2} step={0.05} value={advancedTemperature} onChange={(event) => setAdvancedTemperature(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Nucleus sampling. Lower = safer speech. Range 0-1.">
+                                    Top-P
+                                    <input type="range" min={0} max={1} step={0.05} value={advancedTopP} onChange={(event) => setAdvancedTopP(event.target.value)} className="w-full" />
+                                    <input type="number" min={0} max={1} step={0.05} value={advancedTopP} onChange={(event) => setAdvancedTopP(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Token shortlist size. 0 disables cap.">
+                                    Top-K
+                                    <input type="number" min={0} max={200} step={1} value={advancedTopK} onChange={(event) => setAdvancedTopK(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+
+                                <label className="text-xs text-slate-300" title="Speech rate multiplier. 1.0 is neutral. Range 0.5-2.0.">
+                                    Speed
+                                    <input type="range" min={0.5} max={2} step={0.05} value={advancedSpeed} onChange={(event) => setAdvancedSpeed(event.target.value)} className="w-full" />
+                                    <input type="number" min={0.5} max={2} step={0.05} value={advancedSpeed} onChange={(event) => setAdvancedSpeed(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Penalty for repeated tokens. Range 0.5-3.0.">
+                                    Repetition penalty
+                                    <input type="number" min={0.5} max={3} step={0.1} value={advancedRepetitionPenalty} onChange={(event) => setAdvancedRepetitionPenalty(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                                <label className="text-xs text-slate-300" title="Length bias in decoder. Range 0.2-3.0.">
+                                    Length penalty
+                                    <input type="number" min={0.2} max={3} step={0.1} value={advancedLengthPenalty} onChange={(event) => setAdvancedLengthPenalty(event.target.value)} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-100" />
+                                </label>
+                            </div>
+                        </div>
                     ) : (
-                        <p className="text-xs text-slate-400">
-                            All-streamer mode uses all available datasets/runs for this streamer.
-                        </p>
+                        <p className="text-xs text-slate-400">Use presets only (fast/balanced/best).</p>
                     )}
                 </div>
                 <textarea

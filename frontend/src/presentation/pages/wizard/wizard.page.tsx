@@ -33,10 +33,12 @@ type LegacyJobSteps = {
 };
 
 type LegacyJobOutputs = {
+    runId?: string | null;
     audioPath?: string | null;
     sanitizePath?: string | null;
     srtPath?: string | null;
     datasetPath?: string | null;
+    modelCheckpointPath?: string | null;
     ttsPath?: string | null;
 };
 
@@ -61,7 +63,7 @@ type DatasetRecord = {
     createdAt?: string | null;
 };
 
-type RunKey = 'extract' | 'sanitize' | 'srt' | 'train' | 'tts';
+type RunKey = 'extract' | 'sanitize' | 'srt' | 'train' | 'modelTrain' | 'tts';
 
 const MAX_LOG_LINES = 600;
 
@@ -156,11 +158,13 @@ export const WizardPage: React.FC = () => {
     const [sanitizeState, setSanitizeState] = useState<RunState>({ status: 'idle' });
     const [srtState, setSrtState] = useState<RunState>({ status: 'idle' });
     const [trainState, setTrainState] = useState<RunState>({ status: 'idle' });
+    const [modelTrainState, setModelTrainState] = useState<RunState>({ status: 'idle' });
     const [ttsState, setTtsState] = useState<RunState>({ status: 'idle' });
     const [sanitizeProgress, setSanitizeProgress] = useState<number | null>(null);
     const [extractProgress, setExtractProgress] = useState<number | null>(null);
     const [srtProgress, setSrtProgress] = useState<number | null>(null);
     const [trainProgress, setTrainProgress] = useState<number | null>(null);
+    const [modelTrainProgress, setModelTrainProgress] = useState<number | null>(null);
     const [suggestionRunning, setSuggestionRunning] = useState(false);
     const [searchParams] = useSearchParams();
 
@@ -182,6 +186,7 @@ export const WizardPage: React.FC = () => {
     const [cleanPath, setCleanPath] = useState<string | null>(null);
     const [srtPath, setSrtPath] = useState<string | null>(null);
     const [datasetPath, setDatasetPath] = useState<string | null>(null);
+    const [modelCheckpointPath, setModelCheckpointPath] = useState<string | null>(null);
     const [ttsPath, setTtsPath] = useState<string | null>(null);
     const [waveformReady, setWaveformReady] = useState(false);
     const [cleanWaveformReady, setCleanWaveformReady] = useState(false);
@@ -242,6 +247,7 @@ export const WizardPage: React.FC = () => {
     const sanitizeLogRef = useRef<HTMLDivElement | null>(null);
     const srtLogRef = useRef<HTMLDivElement | null>(null);
     const trainLogRef = useRef<HTMLDivElement | null>(null);
+    const modelTrainLogRef = useRef<HTMLDivElement | null>(null);
     const ttsLogRef = useRef<HTMLDivElement | null>(null);
     const sanitizeAbortRef = useRef<AbortController | null>(null);
     const legacyJobRef = useRef<LegacyJob | null>(null);
@@ -251,6 +257,7 @@ export const WizardPage: React.FC = () => {
     const reviewRef = useRef<HTMLDivElement | null>(null);
     const srtRef = useRef<HTMLDivElement | null>(null);
     const trainRef = useRef<HTMLDivElement | null>(null);
+    const modelTrainRef = useRef<HTMLDivElement | null>(null);
     const ttsRef = useRef<HTMLDivElement | null>(null);
     const revealStateRef = useRef({
         extract: false,
@@ -258,6 +265,7 @@ export const WizardPage: React.FC = () => {
         review: false,
         srt: false,
         train: false,
+        modelTrain: false,
         tts: false,
     });
     const runningToastIdsRef = useRef<Set<string>>(new Set());
@@ -317,15 +325,18 @@ export const WizardPage: React.FC = () => {
         setSanitizeState({ status: 'idle' });
         setSrtState({ status: 'idle' });
         setTrainState({ status: 'idle' });
+        setModelTrainState({ status: 'idle' });
         setTtsState({ status: 'idle' });
         setSanitizeProgress(null);
         setExtractProgress(null);
         setSrtProgress(null);
         setTrainProgress(null);
+        setModelTrainProgress(null);
         setAudioPath(null);
         setCleanPath(null);
         setSrtPath(null);
         setDatasetPath(null);
+        setModelCheckpointPath(null);
         setTtsPath(null);
     }, []);
 
@@ -336,6 +347,7 @@ export const WizardPage: React.FC = () => {
             review: false,
             srt: false,
             train: false,
+            modelTrain: false,
             tts: false,
         };
     }, []);
@@ -353,6 +365,7 @@ export const WizardPage: React.FC = () => {
         setCleanPath(outputs.sanitizePath ?? null);
         setSrtPath(outputs.srtPath ?? null);
         setDatasetPath(outputs.datasetPath ?? null);
+        setModelCheckpointPath(outputs.modelCheckpointPath ?? null);
         setTtsPath(outputs.ttsPath ?? null);
 
         setExtractState(
@@ -375,6 +388,11 @@ export const WizardPage: React.FC = () => {
         setTrainState(
             job.steps.train
                 ? { status: 'done', message: 'Dataset ready', outputPath: outputs.datasetPath ?? undefined }
+                : { status: 'idle' }
+        );
+        setModelTrainState(
+            outputs.modelCheckpointPath
+                ? { status: 'done', message: 'Model checkpoint ready', outputPath: outputs.modelCheckpointPath ?? undefined }
                 : { status: 'idle' }
         );
         setTtsState(
@@ -526,6 +544,10 @@ export const WizardPage: React.FC = () => {
     useEffect(() => {
         scrollLogToEnd(trainLogRef.current);
     }, [trainState.log?.length]);
+
+    useEffect(() => {
+        scrollLogToEnd(modelTrainLogRef.current);
+    }, [modelTrainState.log?.length]);
 
     useEffect(() => {
         scrollLogToEnd(ttsLogRef.current);
@@ -831,7 +853,7 @@ export const WizardPage: React.FC = () => {
 
     const runExtract = async (): Promise<void> => {
         if (!vodUrl.trim()) return;
-        await ensureLegacyJob();
+        const job = await ensureLegacyJob();
         setExtractState({ status: 'running', message: 'Extracting audio...' });
         setExtractProgress(0);
 
@@ -851,6 +873,7 @@ export const WizardPage: React.FC = () => {
                     vodUrl,
                     vodQuality,
                     authToken: authToken.trim() || undefined,
+                    runId: job?.outputs?.runId ?? undefined,
                 }
             );
             clearInterval(progressInterval);
@@ -910,6 +933,7 @@ export const WizardPage: React.FC = () => {
                     extractVocals: effectiveExtractVocals,
                     stream: true,
                     jobId: job?.id ?? undefined,
+                    runId: job?.outputs?.runId ?? undefined,
                 }),
                 signal: controller.signal,
             });
@@ -994,7 +1018,7 @@ export const WizardPage: React.FC = () => {
 
     const runSrt = async (): Promise<void> => {
         if (!vodUrl.trim()) return;
-        await ensureLegacyJob();
+        const job = await ensureLegacyJob();
         setSrtState({ status: 'running', message: 'Transcribing...', log: [] });
         setSrtProgress(5);
         try {
@@ -1007,6 +1031,7 @@ export const WizardPage: React.FC = () => {
                     stream: true,
                     speed: srtSpeed,
                     acceptedOnly: srtAcceptedOnly,
+                    runId: job?.outputs?.runId ?? undefined,
                 }),
             });
 
@@ -1101,15 +1126,15 @@ export const WizardPage: React.FC = () => {
 
     const runTrain = async (): Promise<void> => {
         if (!vodUrl.trim()) return;
-        await ensureLegacyJob();
+        const job = await ensureLegacyJob();
         setTrainState({ status: 'running', message: 'Building dataset...', log: [] });
         setTrainProgress(5);
         try {
             const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
-            const response = await fetch(`${baseUrl}/legacy/train/run`, {
+            const response = await fetch(`${baseUrl}/legacy/dataset/build`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vodUrl, stream: true }),
+                body: JSON.stringify({ vodUrl, stream: true, runId: job?.outputs?.runId ?? undefined }),
             });
 
             if (!response.ok || !response.body) {
@@ -1167,8 +1192,8 @@ export const WizardPage: React.FC = () => {
                         setTrainProgress(null);
                         setTrainState((prev) => ({
                             status: 'error',
-                            message: evt.error || 'Train failed',
-                            log: appendLog(prev.log, evt.error || 'Train failed'),
+                            message: evt.error || 'Dataset build failed',
+                            log: appendLog(prev.log, evt.error || 'Dataset build failed'),
                         }));
                     }
 
@@ -1182,14 +1207,14 @@ export const WizardPage: React.FC = () => {
                             log: (evt.result?.log ?? prev.log ?? []).slice(-MAX_LOG_LINES),
                             outputPath: evt.result.datasetPath,
                         }));
-                        setTtsState({ status: 'ready' });
+                        setModelTrainState({ status: 'ready' });
                         await updateLegacyJob({ train: true }, { datasetPath: evt.result.datasetPath });
                     }
                 }
             }
 
             if (!doneReceived) {
-                throw new Error('Train stream ended without completion event');
+                throw new Error('Dataset build stream ended without completion event');
             }
         } catch (error) {
             setTrainProgress(null);
@@ -1201,9 +1226,96 @@ export const WizardPage: React.FC = () => {
         }
     };
 
+    const runModelTrain = async (): Promise<void> => {
+        if (!vodUrl.trim()) return;
+        const job = await ensureLegacyJob();
+        const runId = job?.outputs?.runId;
+        if (!runId) {
+            setModelTrainState({ status: 'error', message: 'runId missing for model training' });
+            return;
+        }
+
+        setModelTrainState({ status: 'running', message: 'Training model checkpoint...', log: [] });
+        setModelTrainProgress(5);
+
+        try {
+            const start = await legacyPost<{
+                jobId: string;
+                checkpointId: string;
+                checkpointPath: string;
+                metadataPath: string;
+                status: string;
+            }>('/model/train', {
+                vodUrl,
+                runId,
+                epochs: 1,
+                baseModel: 'xtts_v2',
+            });
+
+            setModelTrainState((prev) => ({
+                ...prev,
+                log: appendLog(prev.log, `[queue] ${start.jobId}`),
+            }));
+
+            const baseUrl = config.apiBaseUrl.replace(/\/$/, '');
+            let finished = false;
+            while (!finished) {
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                const response = await fetch(`${baseUrl}/legacy/model/train/jobs/${encodeURIComponent(start.jobId)}`);
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error((payload as { detail?: string }).detail || response.statusText);
+                }
+
+                const status = String((payload as { status?: string }).status || 'queued');
+                const progress = Number((payload as { progress?: number }).progress || 0);
+                setModelTrainProgress(Math.max(5, Math.min(100, progress)));
+
+                const logs = Array.isArray((payload as { log?: string[] }).log) ? (payload as { log?: string[] }).log || [] : [];
+                setModelTrainState((prev) => ({
+                    ...prev,
+                    log: logs.slice(-MAX_LOG_LINES),
+                    message: `Model Train: ${status}`,
+                }));
+
+                if (status === 'done') {
+                    finished = true;
+                    const checkpointPath = String((payload as { checkpointPath?: string }).checkpointPath || start.checkpointPath);
+                    setModelCheckpointPath(checkpointPath);
+                    setModelTrainProgress(100);
+                    setModelTrainState((prev) => ({
+                        ...prev,
+                        status: 'done',
+                        message: 'Model checkpoint ready',
+                        outputPath: checkpointPath,
+                    }));
+                    setTtsState({ status: 'ready' });
+                    await updateLegacyJob({}, { modelCheckpointPath: checkpointPath });
+                } else if (status === 'failed' || status === 'canceled') {
+                    finished = true;
+                    const errorText = String((payload as { error?: string }).error || `Model train ${status}`);
+                    setModelTrainProgress(null);
+                    setModelTrainState((prev) => ({
+                        ...prev,
+                        status: 'error',
+                        message: errorText,
+                        log: appendLog(prev.log, errorText),
+                    }));
+                }
+            }
+        } catch (error) {
+            setModelTrainProgress(null);
+            setModelTrainState((prev) => ({
+                status: 'error',
+                message: (error as Error).message,
+                log: appendLog(prev.log, (error as Error).message),
+            }));
+        }
+    };
+
     const runTts = async (): Promise<void> => {
         if (!vodUrl.trim() || !metadata) return;
-        await ensureLegacyJob();
+        const job = await ensureLegacyJob();
         setTtsState({ status: 'running', message: 'Generating TTS...' });
         try {
             const result = await legacyPost<{ outputPath: string; log: string[] }>(
@@ -1216,6 +1328,7 @@ export const WizardPage: React.FC = () => {
                     targetDatasetPath: ttsSourceMode === 'target_dataset' ? ttsTargetDatasetPath || undefined : undefined,
                     qualityPreset: ttsQualityPreset,
                     acceptedOnly: ttsAcceptedOnly,
+                    runId: job?.outputs?.runId ?? undefined,
                 }
             );
             setTtsPath(result.outputPath);
@@ -1267,15 +1380,21 @@ export const WizardPage: React.FC = () => {
                     ? 'ready'
                     : 'blocked'
                 : trainState.status;
+        const modelTrainStep: StepStatus =
+            modelTrainState.status === 'idle'
+                ? trainState.status === 'done'
+                    ? 'ready'
+                    : 'blocked'
+                : modelTrainState.status;
         const ttsStep: StepStatus =
             ttsState.status === 'idle'
-                ? trainState.status === 'done'
+                ? modelTrainState.status === 'done'
                     ? 'ready'
                     : 'blocked'
                 : ttsState.status;
 
-        return [vodStep, extractStep, sanitizeStep, reviewStep, srtStep, trainStep, ttsStep];
-    }, [metadata, legacyJob, extractState, sanitizeState, srtState, trainState, ttsState]);
+        return [vodStep, extractStep, sanitizeStep, reviewStep, srtStep, trainStep, modelTrainStep, ttsStep];
+    }, [metadata, legacyJob, extractState, sanitizeState, srtState, trainState, modelTrainState, ttsState]);
 
     const pipelineProgress = useMemo(
         () => overallProgressForSteps([
@@ -1283,9 +1402,10 @@ export const WizardPage: React.FC = () => {
             { status: sanitizeState.status, progress: sanitizeProgress },
             { status: srtState.status, progress: srtProgress },
             { status: trainState.status, progress: trainProgress },
+            { status: modelTrainState.status, progress: modelTrainProgress },
             { status: ttsState.status },
         ]),
-        [extractState.status, sanitizeState.status, srtState.status, trainState.status, ttsState.status, sanitizeProgress, srtProgress, trainProgress]
+        [extractState.status, sanitizeState.status, srtState.status, trainState.status, modelTrainState.status, ttsState.status, sanitizeProgress, srtProgress, trainProgress, modelTrainProgress]
     );
 
     const sanitizeProgressValue = useMemo(
@@ -1306,6 +1426,11 @@ export const WizardPage: React.FC = () => {
     const trainProgressValue = useMemo(
         () => progressValueForStep(trainState.status, trainProgress),
         [trainState.status, trainProgress]
+    );
+
+    const modelTrainProgressValue = useMemo(
+        () => progressValueForStep(modelTrainState.status, modelTrainProgress),
+        [modelTrainState.status, modelTrainProgress]
     );
 
     const sanitizeSuggestion = useMemo(() => {
@@ -1337,6 +1462,7 @@ export const WizardPage: React.FC = () => {
             sanitize: sanitizeRef,
             srt: srtRef,
             train: trainRef,
+            modelTrain: modelTrainRef,
             tts: ttsRef,
         };
         refMap[key].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1347,11 +1473,12 @@ export const WizardPage: React.FC = () => {
             { key: 'extract', label: 'Extract audio', running: extractState.status === 'running' },
             { key: 'sanitize', label: 'Sanitize audio', running: sanitizeState.status === 'running' },
             { key: 'srt', label: 'Transcribe (SRT)', running: srtState.status === 'running' },
-            { key: 'train', label: 'Train dataset', running: trainState.status === 'running' },
+            { key: 'train', label: 'Dataset Build', running: trainState.status === 'running' },
+            { key: 'modelTrain', label: 'Model Train', running: modelTrainState.status === 'running' },
             { key: 'tts', label: 'Generate TTS', running: ttsState.status === 'running' },
         ];
         return jobs;
-    }, [extractState.status, sanitizeState.status, srtState.status, trainState.status, ttsState.status]);
+    }, [extractState.status, sanitizeState.status, srtState.status, trainState.status, modelTrainState.status, ttsState.status]);
 
     useEffect(() => {
         const visibleRunningToastIds = new Set<string>();
@@ -1391,7 +1518,8 @@ export const WizardPage: React.FC = () => {
     const showReview = sanitizeState.status === 'done';
     const showSrt = sanitizeState.status === 'done';
     const showTrain = srtState.status === 'done';
-    const showTts = trainState.status === 'done';
+    const showModelTrain = trainState.status === 'done';
+    const showTts = modelTrainState.status === 'done';
 
     useEffect(() => {
         const steps = [
@@ -1400,6 +1528,7 @@ export const WizardPage: React.FC = () => {
             { key: 'review', visible: showReview, ref: reviewRef },
             { key: 'srt', visible: showSrt, ref: srtRef },
             { key: 'train', visible: showTrain, ref: trainRef },
+            { key: 'modelTrain', visible: showModelTrain, ref: modelTrainRef },
             { key: 'tts', visible: showTts, ref: ttsRef },
         ] as const;
 
@@ -1410,7 +1539,7 @@ export const WizardPage: React.FC = () => {
             }
             revealStateRef.current[step.key] = step.visible;
         });
-    }, [showExtract, showSanitize, showReview, showSrt, showTrain, showTts]);
+    }, [showExtract, showSanitize, showReview, showSrt, showTrain, showModelTrain, showTts]);
 
     return (
         <div className="wizard-page p-6 grid-bg">
@@ -1425,7 +1554,7 @@ export const WizardPage: React.FC = () => {
                                 Streamer datasets from VODs, step by step.
                             </h1>
                             <p className="text-sm text-slate-400 max-w-2xl">
-                                Validate, extract, sanitize, review, transcribe, and train with a simple guided flow.
+                                Validate, extract, sanitize, review, transcribe, build dataset, train model, and generate TTS.
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-3">
@@ -1439,15 +1568,16 @@ export const WizardPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-7 float-in">
+                <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8 float-in">
                     {[
                         'VOD',
                         'Extract',
                         'Sanitize',
                         'Review',
                         'SRT',
-                        'Train',
-                        'TTS',
+                        'Dataset Build',
+                        'Model Train',
+                        'TTS Generate',
                     ].map((label, index) => (
                         <div
                             key={label}
@@ -1474,8 +1604,9 @@ export const WizardPage: React.FC = () => {
                             'Sanitize',
                             'Review',
                             'SRT',
-                            'Train',
-                            'TTS',
+                            'Dataset Build',
+                            'Model Train',
+                            'TTS Generate',
                         ].map((label, index) => (
                             <div key={label} className="timeline-item">
                                 <span className={`timeline-dot ${stepStatus[index]}`}></span>
@@ -1524,7 +1655,8 @@ export const WizardPage: React.FC = () => {
                                 <ul className="legend-list">
                                     <li><strong>Review:</strong> Manual accept/reject segments.</li>
                                     <li><strong>SRT:</strong> Generate subtitles with faster-whisper.</li>
-                                    <li><strong>Train:</strong> Build dataset from clean audio + SRT.</li>
+                                    <li><strong>Dataset Build:</strong> Build immutable run clips from sanitize + review + ASR.</li>
+                                    <li><strong>Model Train:</strong> Queue fine-tune/checkpoint training job.</li>
                                     <li><strong>TTS:</strong> Generate a test voice sample from your dataset.</li>
                                 </ul>
                             </div>
@@ -2227,11 +2359,11 @@ export const WizardPage: React.FC = () => {
                     <section ref={trainRef} className="glass rounded-2xl p-6 space-y-4 step-reveal">
                         <div>
                             <h2 className="text-xl font-semibold text-white">
-                                Step 6 - Train Dataset
-                                <span className="help-tip" data-tip="Slices clean audio with the SRT to build a dataset.">?</span>
+                                Step 6 - Dataset Build
+                                <span className="help-tip" data-tip="Builds immutable run dataset from sanitize + review + ASR overlap.">?</span>
                             </h2>
                             <p className="text-sm text-slate-400">
-                                Build the dataset from clean audio and SRT.
+                                Build the dataset artifacts for this run.
                             </p>
                         </div>
 
@@ -2242,7 +2374,7 @@ export const WizardPage: React.FC = () => {
                                 disabled={trainState.status === 'running' || stepStatus[5] === 'blocked'}
                                 className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60 transition-all"
                             >
-                                {trainState.status === 'running' ? 'Training...' : 'Run Train'}
+                                {trainState.status === 'running' ? 'Building...' : 'Run Dataset Build'}
                             </button>
                             <span className="help-tip" data-tip="Builds clips and manifests under the dataset folder.">?</span>
                             {datasetPath && (
@@ -2274,7 +2406,61 @@ export const WizardPage: React.FC = () => {
                                     </div>
                                 ))
                             ) : (
-                                <div className="log-line text-slate-500">Waiting for train logs...</div>
+                                <div className="log-line text-slate-500">Waiting for dataset build logs...</div>
+                            )}
+                        </div>
+                    </section>
+                )}
+
+                {showModelTrain && (
+                    <section ref={modelTrainRef} className="glass rounded-2xl p-6 space-y-4 step-reveal">
+                        <div>
+                            <h2 className="text-xl font-semibold text-white">
+                                Step 7 - Model Train
+                                <span className="help-tip" data-tip="Queues fine-tune/checkpoint training for this run dataset.">?</span>
+                            </h2>
+                            <p className="text-sm text-slate-400">
+                                Train a checkpoint artifact for this streamer and run.
+                            </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={runModelTrain}
+                                disabled={modelTrainState.status === 'running' || stepStatus[6] === 'blocked'}
+                                className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60 transition-all"
+                            >
+                                {modelTrainState.status === 'running' ? 'Training model...' : 'Run Model Train'}
+                            </button>
+                            <span className="help-tip" data-tip="Creates checkpoint metadata and weight artifacts under models/<streamer>/<checkpointId>.">?</span>
+                            {modelCheckpointPath && (
+                                <span className="text-sm output-glow mono">Output: {modelCheckpointPath}</span>
+                            )}
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                                <span>Progress</span>
+                                <span>{modelTrainProgressValue}%</span>
+                            </div>
+                            <div className="progress-track">
+                                <div
+                                    className={progressClass(modelTrainState.status)}
+                                    style={{ width: `${modelTrainProgressValue}%` }}
+                                ></div>
+                            </div>
+                        </div>
+
+                        <div className="log-panel" ref={modelTrainLogRef}>
+                            {modelTrainState.log && modelTrainState.log.length > 0 ? (
+                                modelTrainState.log.map((line, idx) => (
+                                    <div key={`model-train-${idx}`} className="log-line">
+                                        {line}
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="log-line text-slate-500">Waiting for model train logs...</div>
                             )}
                         </div>
                     </section>
@@ -2284,12 +2470,47 @@ export const WizardPage: React.FC = () => {
                     <section ref={ttsRef} className="glass rounded-2xl p-6 space-y-4 step-reveal">
                         <div>
                             <h2 className="text-xl font-semibold text-white">
-                                Step 7 - TTS
+                                Step 8 - TTS Generate
                                 <span className="help-tip" data-tip="Generates a voice sample from your trained dataset.">?</span>
                             </h2>
                             <p className="text-sm text-slate-400">
                                 Generate a test voice sample from prepared dataset clips (XTTS speaker conditioning).
                             </p>
+                        </div>
+
+                        <div className="space-y-2 rounded-lg border border-white/10 p-3">
+                            <label className="flex items-center gap-2 text-sm text-slate-300">
+                                <input
+                                    type="checkbox"
+                                    checked={ttsSourceMode === 'target_dataset'}
+                                    onChange={(event) => setTtsSourceMode(event.target.checked ? 'target_dataset' : 'all_streamer')}
+                                />
+                                Use particular dataset
+                            </label>
+                            {ttsSourceMode === 'target_dataset' ? (
+                                <div>
+                                    <label className="text-xs text-slate-400">Dataset / Run</label>
+                                    <select
+                                        value={ttsTargetDatasetPath}
+                                        onChange={(event) => setTtsTargetDatasetPath(event.target.value)}
+                                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-white"
+                                    >
+                                        {ttsDatasets.length === 0 ? (
+                                            <option value="">{ttsDatasetsLoading ? 'Loading datasets...' : 'No datasets found'}</option>
+                                        ) : (
+                                            ttsDatasets.map((item) => (
+                                                <option key={item.datasetId} value={item.datasetPath || ''}>
+                                                    {(item.runId ? `Run ${item.runId}` : 'Legacy dataset')} • {item.clipsCount ?? 0} clips
+                                                </option>
+                                            ))
+                                        )}
+                                    </select>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-400">
+                                    Default mode uses all available artifacts for this streamer.
+                                </p>
+                            )}
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-2">
@@ -2318,41 +2539,6 @@ export const WizardPage: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="space-y-2 rounded-lg border border-white/10 p-3">
-                            <label className="flex items-center gap-2 text-sm text-slate-300">
-                                <input
-                                    type="checkbox"
-                                    checked={ttsSourceMode === 'target_dataset'}
-                                    onChange={(event) => setTtsSourceMode(event.target.checked ? 'target_dataset' : 'all_streamer')}
-                                />
-                                Use target dataset
-                            </label>
-                            {ttsSourceMode === 'target_dataset' ? (
-                                <div>
-                                    <label className="text-xs text-slate-400">Target dataset</label>
-                                    <select
-                                        value={ttsTargetDatasetPath}
-                                        onChange={(event) => setTtsTargetDatasetPath(event.target.value)}
-                                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-white"
-                                    >
-                                        {ttsDatasets.length === 0 ? (
-                                            <option value="">{ttsDatasetsLoading ? 'Loading datasets...' : 'No datasets found'}</option>
-                                        ) : (
-                                            ttsDatasets.map((item) => (
-                                                <option key={item.datasetId} value={item.datasetPath || ''}>
-                                                    {(item.runId ? `Run ${item.runId}` : 'Legacy dataset')} • {item.clipsCount ?? 0} clips
-                                                </option>
-                                            ))
-                                        )}
-                                    </select>
-                                </div>
-                            ) : (
-                                <p className="text-xs text-slate-400">
-                                    Using all available streamer datasets (all VOD runs).
-                                </p>
-                            )}
-                        </div>
-
                         <div>
                             <label className="text-sm text-slate-400">
                                 Text
@@ -2370,7 +2556,7 @@ export const WizardPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={runTts}
-                                disabled={ttsState.status === 'running' || stepStatus[6] === 'blocked'}
+                                disabled={ttsState.status === 'running' || stepStatus[7] === 'blocked'}
                                 className="primary-btn px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-60 transition-all"
                             >
                                 {ttsState.status === 'running' ? 'Generating...' : 'Run TTS'}
@@ -2444,7 +2630,10 @@ export const WizardPage: React.FC = () => {
                             </button>
                         </div>
                         <div className="review-modal-body">
-                            <ManualReviewPage vodUrlOverride={vodUrl} />
+                            <ManualReviewPage
+                                vodUrlOverride={vodUrl}
+                                runIdOverride={legacyJob?.outputs?.runId ?? undefined}
+                            />
                         </div>
                     </div>
                 </div>

@@ -26,6 +26,7 @@ class JobStatusResponse(BaseModel):
 class RunAudioRequest(BaseModel):
     """Audio extraction request."""
     vodUrl: str
+    runId: Optional[str] = None
     outdir: str = "out"
     datasetOut: str = "dataset"
     force: bool = False
@@ -122,6 +123,7 @@ class SaveSegmentReviewRequest(BaseModel):
     vodUrl: str
     outdir: str = "out"
     datasetOut: str = "dataset"
+    runId: Optional[str] = None
     totalSegments: int
     reviewIndex: int
     votes: List[SegmentReviewVote] = []
@@ -151,6 +153,7 @@ class ExportClipsRequest(BaseModel):
     vodUrl: str
     outdir: str = "out"
     datasetOut: str = "dataset"
+    runId: Optional[str] = None
 
 
 class ExportClipItem(BaseModel):
@@ -201,6 +204,9 @@ class SegmentManifestResponse(BaseModel):
 class RunSrtRequest(BaseModel):
     """SRT transcription request."""
     vodUrl: str
+    runId: Optional[str] = None
+    outdir: str = "out"
+    datasetOut: str = "dataset"
     stream: bool = False
     speed: Literal["accurate", "balanced", "fast"] = "balanced"
     acceptedOnly: bool = True
@@ -218,6 +224,7 @@ class RunSrtResponse(BaseModel):
 class RunTtsRequest(BaseModel):
     """TTS generation request."""
     vodUrl: str
+    runId: Optional[str] = None
     outdir: str = "out"
     datasetOut: str = "dataset"
     text: str
@@ -227,6 +234,29 @@ class RunTtsRequest(BaseModel):
     targetDatasetPath: Optional[str] = None
     qualityPreset: Literal["fast", "balanced", "best"] = "balanced"
     acceptedOnly: bool = False
+    advancedMode: bool = False
+
+    # advanced reference selection overrides
+    targetSeconds: Optional[float] = None
+    maxPerRun: Optional[int] = None
+    minSpeakerSim: Optional[float] = None
+    minClipSec: Optional[float] = None
+    maxClipSec: Optional[float] = None
+    maxClips: Optional[int] = None
+    speakerClipCount: Optional[int] = None
+
+    # advanced generation/runtime controls
+    model: Optional[str] = None
+    language: Optional[str] = None
+    device: Optional[Literal["auto", "cpu", "cuda"]] = None
+    cpuThreads: Optional[int] = None
+    cudaBenchmark: Optional[bool] = None
+    temperature: Optional[float] = None
+    topP: Optional[float] = None
+    topK: Optional[int] = None
+    speed: Optional[float] = None
+    repetitionPenalty: Optional[float] = None
+    lengthPenalty: Optional[float] = None
 
 
 class RunTtsResponse(BaseModel):
@@ -241,6 +271,7 @@ class RunTtsResponse(BaseModel):
 class RunTrainRequest(BaseModel):
     """Voice dataset training request."""
     vodUrl: str
+    runId: Optional[str] = None
     outdir: str = "out"
     datasetOut: str = "dataset"
     minSpeechMs: int = 1200
@@ -252,6 +283,8 @@ class RunTrainRequest(BaseModel):
     threads: int = 4
     force: bool = True
     stream: bool = False
+    minSpeakerSim: float = 0.10
+    targetSpeaker: Optional[str] = None
 
 
 class RunTrainResponse(BaseModel):
@@ -260,6 +293,20 @@ class RunTrainResponse(BaseModel):
     clipsDir: str
     manifestPath: str
     segmentsPath: str
+    exitCode: int
+    log: List[str] = []
+
+
+class RunDiarizationRequest(BaseModel):
+    vodUrl: str
+    runId: Optional[str] = None
+    outdir: str = "out"
+    datasetOut: str = "dataset"
+
+
+class RunDiarizationResponse(BaseModel):
+    labelsPath: str
+    speakerCount: int
     exitCode: int
     log: List[str] = []
 
@@ -276,6 +323,7 @@ class JobSteps(BaseModel):
 
 class JobOutputs(BaseModel):
     """Job output paths."""
+    runId: Optional[str] = None
     audioPath: Optional[str] = None
     sanitizePath: Optional[str] = None
     srtPath: Optional[str] = None
@@ -311,6 +359,7 @@ class UpdateJobRequest(BaseModel):
 class TranscribeSegmentRequest(BaseModel):
     """Request to transcribe a single audio segment."""
     vodUrl: str
+    runId: Optional[str] = None
     segmentIndex: int
     outdir: str = "out"
     datasetOut: str = "dataset"
@@ -363,4 +412,48 @@ class StreamerDatasetSummaryResponse(BaseModel):
 class StreamerDatasetSummaryListResponse(BaseModel):
     """List of streamer dataset summaries."""
     items: List[StreamerDatasetSummaryResponse]
+    total: int = 0
+
+
+class ModelTrainRequest(BaseModel):
+    """Model fine-tune request (stub)."""
+    vodUrl: str
+    runId: Optional[str] = None
+    outdir: str = "out"
+    datasetOut: str = "dataset"
+    modelOut: str = "models"
+    baseModel: str = "xtts_v2"
+    epochs: int = 0
+
+
+class ModelTrainResponse(BaseModel):
+    """Model fine-tune response (stub)."""
+    jobId: str
+    checkpointId: str
+    status: str
+    checkpointPath: str
+    metadataPath: str
+    log: List[str] = []
+
+
+class ModelTrainJobResponse(BaseModel):
+    id: str
+    status: Literal["queued", "running", "failed", "done", "canceled"]
+    createdAt: str
+    updatedAt: str
+    runId: str
+    vodUrl: str
+    streamer: str
+    checkpointId: str
+    checkpointPath: str
+    metadataPath: str
+    datasetManifest: str
+    progress: int = 0
+    error: Optional[str] = None
+    log: List[str] = []
+
+
+class ModelTrainJobListResponse(BaseModel):
+    items: List[ModelTrainJobResponse]
+    total: int
     total: int

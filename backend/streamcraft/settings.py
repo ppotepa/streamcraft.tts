@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # TTS provider
     tts_provider: str = "script"  # script | python | remote
     tts_script_path: str = ""
+    model_train_script_path: str = ""
+    diarization_script_path: str = ""
     
     # External API credentials
     twitch_client_id: str = ""

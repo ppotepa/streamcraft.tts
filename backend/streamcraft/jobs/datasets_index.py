@@ -64,7 +64,7 @@ def _build_run_record(streamer_slug: str, run_dir: Path, out_root: Path, workspa
     vod_identifier = metadata.get("vod_identifier")
 
     clips_dir = run_dir / "clips"
-    manifest_csv = run_dir / "manifest.csv"
+    manifest_jsonl = run_dir / "manifest.jsonl"
     segments_manifest_name = metadata.get("segments_manifest")
     segments_manifest = run_dir / segments_manifest_name if segments_manifest_name else None
     if not segments_manifest or not segments_manifest.exists():
@@ -85,10 +85,10 @@ def _build_run_record(streamer_slug: str, run_dir: Path, out_root: Path, workspa
         "datasetPath": _to_rel(run_dir, workspace_root),
         "clipsPath": _to_rel(clips_dir, workspace_root) if clips_dir.exists() else None,
         "clipsCount": _count_clips(clips_dir),
-        "manifestPath": _to_rel(manifest_csv, workspace_root) if manifest_csv.exists() else None,
+        "manifestPath": _to_rel(manifest_jsonl, workspace_root) if manifest_jsonl.exists() else None,
         "segmentsPath": _to_rel(segments_manifest, workspace_root) if segments_manifest and segments_manifest.exists() else None,
         "latestTtsPath": _to_rel(tts_files[0], workspace_root) if tts_files else None,
-        "hasTrainArtifacts": clips_dir.exists() and manifest_csv.exists(),
+        "hasTrainArtifacts": clips_dir.exists() and manifest_jsonl.exists(),
         "hasTtsArtifacts": bool(tts_files),
         "params": metadata.get("params") or {},
         "stats": metadata.get("stats") or {},
@@ -112,7 +112,7 @@ def _build_legacy_record(streamer_slug: str, streamer_dir: Path, out_root: Path,
         "datasetId": f"{streamer_slug}:legacy",
         "streamer": streamer_slug,
         "runId": None,
-        "status": "legacy",
+        "status": "legacy_deprecated",
         "createdAt": None,
         "vodUrl": None,
         "vodId": None,
